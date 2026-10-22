@@ -1,0 +1,35 @@
+# Local environments, model weights, native code and builds
+.conda/
+.conda-envs/
+.venv/
+.cache/
+vendor/
+build/
+dist/
+models/
+*.gguf
+*.bin
+*.so*
+*.dll
+*.exe
+*.o
+*.a
+*.egg-info/
+# Captures, results, logs and machine-specific settings
+artifacts/
+recordings/
+*.wav
+*.mp3
+*.flac
+*.log
+config/local.toml
+*.local.toml
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
