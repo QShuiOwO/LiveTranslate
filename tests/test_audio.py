@@ -168,3 +168,23 @@ def test_enumeration_refreshes_bluetooth_before_monitor_selection(monkeypatch):
     monkeypatch.setattr("livetranslate.audio.linux.bluetooth_device_state", lambda path: BluetoothDeviceState(True, "Headset"))
     rows = LinuxAudioCapture(AudioConfig()).enumerate_monitors()
     assert select_monitor(rows).connected
+
+
+@pytest.mark.parametrize("source_state,sink_state,availability,bluez,expected", [
+    ("RUNNING", "RUNNING", "available", None, True),
+    ("RUNNING", "RUNNING", "yes", None, True),
+    ("RUNNING", "RUNNING", "available", False, False),
+    ("RUNNING", "RUNNING", "unavailable", None, False),
+    ("RUNNING", "RUNNING", "unknown", None, False),
+    ("SUSPENDED", "RUNNING", "available", None, False),
+    ("RUNNING", "SUSPENDED", "available", None, False),
+    ("UNAVAILABLE", "RUNNING", "available", None, False),
+])
+def test_active_monitor_fallback_when_bluez_is_unavailable(source_state, sink_state, availability, bluez, expected):
+    sinks = [{"name": "bt", "monitor_source": "bt.monitor", "state": sink_state,
+              "active_port": "headset", "ports": [{"name": "headset", "availability": availability}],
+              "properties": {"api.bluez5.path": BLUETOOTH_PATH, "api.bluez5.connection": "disconnected"}}]
+    sources = [{"name": "bt.monitor", "state": source_state}]
+    states = {} if bluez is None else {BLUETOOTH_PATH: BluetoothDeviceState(bluez, "Headset")}
+    rows = parse_monitors(sources, sinks, "bt", states)
+    assert rows[0].connected is expected

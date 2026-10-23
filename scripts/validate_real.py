@@ -24,7 +24,7 @@ def main():
     p.add_argument("--config", type=Path, default=ROOT / "config/default.toml")
     p.add_argument("--source", help="Explicit monitor; playback is directed to its associated sink without changing system defaults")
     p.add_argument("--duration", type=float, default=15)
-    p.add_argument("--speech", type=Path, default=ROOT / "vendor/whisper.cpp/samples/jfk.wav")
+    p.add_argument("--speech", type=Path, default=ROOT / "artifacts/jfk.wav")
     p.add_argument("--capture-only", action="store_true")
     p.add_argument("--output", type=Path, default=ROOT / "artifacts/real-system-e2e.json")
     args = p.parse_args()

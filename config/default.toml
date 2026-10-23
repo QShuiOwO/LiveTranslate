@@ -7,7 +7,7 @@ source = ""
 silence_dbfs = -60.0
 
 [asr]
-binary = "../build/whisper-vulkan/bin/whisper-cli"
+binary = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
 model = "../models/ggml-small.en.bin"
 backend = "vulkan"
 device = 0
@@ -22,7 +22,7 @@ max_tokens = 256
 seed = 42
 
 [server]
-binary = "../build/llama-vulkan/bin/llama-server"
+binary = "../build/llama-vulkan-f5027fb21307/bin/llama-server"
 model = "../models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
 port = 8080
 backend = "vulkan"
@@ -35,7 +35,7 @@ threads = 8
 directory = "../artifacts"
 
 [stream]
-whisper_server = "../build/whisper-vulkan/bin/whisper-server"
+whisper_server = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-server"
 whisper_port = 8082
 vad_mode = 2
 vad_floor_dbfs = -52.0

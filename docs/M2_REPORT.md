@@ -120,3 +120,9 @@ python scripts/validate_real.py --config artifacts/m2-regression-final.local.tom
 追加验证：artifacts/output-follow-bluetooth-01，真实英语定向播放到当前默认蓝牙耳机，从其 monitor 捕获 34.26 秒 PCM，由 Small.en/Qwen Vulkan 产生 4 条最终双语字幕，真实 xcb 窗口绘制与退出均通过，零推理错误、零音频丢弃、无遗留线程。双模型由本次运行启动，全部本地推理。系统默认输出切换逻辑通过模拟设备列表的自动化用例验证；没有更改全局默认设备来做物理切换测试，也没有为此修复重做 30 分钟长测。
 
 当前完整回归为 **120 passed，0 skipped**（含 3 项真实模型），JUnit 为 artifacts/output-follow-all.xml。新增 13 项覆盖蓝牙状态双向纠正、中文名称、无效/缺失 D-Bus 回退、查询路径、枚举整合、自动输出变化与显式固定源。初次在短测结束后运行真实测试时，受管 llama-server 已退出，2 项报告 connection refused；保留 output-follow-all.service-stopped.xml，使用专用服务重新运行后 120 项通过。本机配置和蓝牙设备标识只保留在被忽略的 config/local.toml、artifacts/ 中。
+
+## 后续原生引擎升级
+
+Whisper 升级到 v1.9.5 / d1be6fde11ac，llama.cpp 升级到 f5027fb21307，均在项目目录以 Vulkan 构建并接入默认配置。沿用 Small.en 与 Qwen 权重，137 项测试通过，包含 3 项真实模型；新增构建目录保护、版本一致性及活动蓝牙后备用例。
+
+升级后真实 HDMI 的 M1 内容验收与 M2 35 秒字幕短测通过。135 秒运行产生 26 条最终双语，但窗口最小化后缺少绘制，只有 7/26 可见事件；默认蓝牙运行的 5/5 字幕实际绘制通过，额外 JFK 内容核对未通过，单独保留失败。本次未重跑新版的 30 分钟验收，本文前面的 30 分钟结果仍对应原提交。完整版本、性能、失败记录和回退方式见 [原生引擎升级报告](NATIVE_UPGRADE.md)。

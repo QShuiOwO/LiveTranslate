@@ -38,6 +38,6 @@ GPU sysfs 采样间隔 100 ms，记录全设备显存基线、峰值、结束值
 
 `config/default.toml` 是可提交的便携配置，相对路径按 TOML 所在目录解析。CLI 的路径参数按当前工作目录解析并覆盖配置。`config/local.toml` 与 `*.local.toml` 被忽略，可存本机设备与绝对路径。未知字段和非法数值会报错，避免拼写错误被静默忽略。
 
-`config/native-lock.json` 固定官方原生源码 commit；`config/model-lock.json` 固定模型仓库 revision、大小和 SHA-256。下载不要求登录。构建脚本先检查已有官方 Whisper 提交，复制 Git archive 到项目内构建，保留原工作树；Vulkan 编译失败会保存错误后尝试独立 CPU 构建，生成明确标注后端的本机配置。
+`config/native-lock.json` 固定官方原生源码 commit；`config/model-lock.json` 固定模型仓库 revision、大小和 SHA-256。下载不要求登录。构建脚本先检查已有官方 Whisper/llama 仓库，复制固定提交的 Git 对象到项目内构建，保留原工作树及其修改。源码、产物按 commit 分开保存，旧运行版本可回退；每次尝试的日志独立保存。Vulkan 编译失败会保存错误后尝试独立 CPU 构建，生成明确标注后端的候选配置，只有真实推理通过后才切换本机配置。当前升级结果见 [原生引擎升级报告](NATIVE_UPGRADE.md)。
 
 pytest 单元和 Fake 集成测试不加载模型。真实模型测试需显式设置 `LIVETRANSLATE_REAL=1`；播放回采验收由 `scripts/validate_real.py` 完成，使用官方英语语音经真实输出设备播放，再捕获其 monitor。正弦波测试数据只用于单元测试，绝不用于真实模型验收。

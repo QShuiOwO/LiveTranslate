@@ -82,10 +82,15 @@ def parse_monitors(sources: list[dict], sinks: list[dict], default_sink: str,
         sink_props = (sink or {}).get("properties", {})
         connection = sink_props.get("api.bluez5.connection")
         device = (bluetooth_states or {}).get(sink_props.get("api.bluez5.path"))
-        connected = (device.connected if device else connection != "disconnected")
-        connected = connected and source.get("state", "").upper() != "UNAVAILABLE"
         active = (sink or {}).get("active_port")
         ports = (sink or {}).get("ports", [])
+        # BlueZ can be unavailable while an output and its monitor are already running.
+        live_port = bool(sink_props.get("api.bluez5.path")
+                         and (sink or {}).get("state", "").upper() == "RUNNING"
+                         and source.get("state", "").upper() == "RUNNING"
+                         and any(p.get("name") == active and p.get("availability") in {"available", "yes"} for p in ports))
+        connected = device.connected if device else connection != "disconnected" or live_port
+        connected = connected and source.get("state", "").upper() != "UNAVAILABLE"
         if any(p.get("name") == active and p.get("availability") in {"not available", "unavailable", "no"} for p in ports):
             connected = False
         description = f"Monitor of {device.alias}" if device and device.alias else source.get("description", "")

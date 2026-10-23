@@ -2,6 +2,8 @@
 
 2026-10-23，Ubuntu 24.04 / RX 9070 XT / Vulkan，真实 HDMI monitor，Qt xcb / XWayland。最终长测 `artifacts/m2-soak-05` 的 acceptance.json 与 analysis.json 均为 **true**。
 
+以下长测数据对应升级前的原生引擎；Whisper v1.9.5 与 llama.cpp 新提交的测量见 [NATIVE_UPGRADE.md](NATIVE_UPGRADE.md)，两次运行的样本数量与测试长度分别列出。
+
 ## 最终 30 分钟显示时延
 
 会话 1840.36 秒；PCM 1839.28 秒（30 分 39.28 秒）。真实人声素材 1827.67 秒自然播放完毕，未被终止。最终英文/双语均为 361 条，最终双语绘制覆盖 361/361（100%）。没有用 Fake、TTS 或源文本补齐识别/翻译结果。

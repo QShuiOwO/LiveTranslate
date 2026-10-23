@@ -1,10 +1,11 @@
 {
   "whisper": {
     "repo": "https://github.com/ggml-org/whisper.cpp.git",
-    "commit": "200b1197907545a88c5a00fb15f52e2cf88af6f5"
+    "commit": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+    "tag": "v1.9.5"
   },
   "llama": {
     "repo": "https://github.com/ggml-org/llama.cpp.git",
-    "commit": "d88040c704c8855c497d46c20675a3d492f70f94"
+    "commit": "f5027fb21307eb264aed483242603d68c87b0fe3"
   }
 }

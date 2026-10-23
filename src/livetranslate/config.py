@@ -18,7 +18,7 @@ class AudioConfig:
 
 @dataclass(frozen=True)
 class ASRConfig:
-    binary: str = "build/whisper-vulkan/bin/whisper-cli"
+    binary: str = "build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
     model: str = "models/ggml-small.en.bin"
     backend: str = "vulkan"
     device: int = 0
@@ -37,7 +37,7 @@ class TranslationConfig:
 
 @dataclass(frozen=True)
 class ServerConfig:
-    binary: str = "build/llama-vulkan/bin/llama-server"
+    binary: str = "build/llama-vulkan-f5027fb21307/bin/llama-server"
     model: str = "models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
     port: int = 8080
     backend: str = "vulkan"
@@ -54,7 +54,7 @@ class OutputConfig:
 
 @dataclass(frozen=True)
 class StreamConfig:
-    whisper_server: str = "build/whisper-vulkan/bin/whisper-server"
+    whisper_server: str = "build/whisper-vulkan-d1be6fde11ac/bin/whisper-server"
     whisper_port: int = 8082
     vad_mode: int = 2
     vad_floor_dbfs: float = -52.0

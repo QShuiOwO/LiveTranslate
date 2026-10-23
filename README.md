@@ -6,7 +6,7 @@ Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系�
 
 本次 M1 已通过真实 HDMI monitor 端到端验收；最终 pytest 69 项通过，包含真实模型测试。默认蓝牙输出已断开，该默认路径保留为失败。逐项结果见 [测试报告](docs/test-results.md)。
 
-M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收；后续系统输出跟随与蓝牙检测修复后，当前 120 项测试通过。原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、30 分钟运行结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)。
+M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收；系统输出跟随、蓝牙检测修复及原生引擎升级后，当前 137 项测试通过，包含 3 项真实模型测试。原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、原引擎的 30 分钟结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)；当前引擎版本、升级回归及性能对比见 [原生引擎升级报告](docs/NATIVE_UPGRADE.md)。
 
 ## M2 连续双语字幕
 
@@ -56,7 +56,7 @@ env -u PYTHONPATH QT_QPA_PLATFORM=xcb \
 
 `[audio] source = ""` 会监听 Ubuntu“声音输出”当前选中设备的 monitor。连续运行中约每 2 秒检查默认输出，切换输出后结束旧采集、重连新 monitor 并切断旧音频上下文。配置固定的 monitor 名称或传入 `--source` 时保持固定设备。程序只读取系统的输出选择。
 
-蓝牙设备的连接状态与名称通过可用的 `busctl` 只读查询 [BlueZ Device1](https://github.com/bluez/bluez/blob/master/doc/org.bluez.Device.rst)，避免 PipeWire 缓存的旧 `api.bluez5.connection` 字段把实际连接的耳机误判为断开。BlueZ 查询不可用时保留 pactl 的检测结果。
+蓝牙设备的连接状态与名称通过可用的 `busctl` 只读查询 [BlueZ Device1](https://github.com/bluez/bluez/blob/master/doc/org.bluez.Device.rst)，避免 PipeWire 缓存的旧 `api.bluez5.connection` 字段把实际连接的耳机误判为断开。BlueZ 查询不可用时，只有输出和 monitor 均为 RUNNING、活动端口明确可用，才允许尝试该监听源；否则保留 pactl 的检测结果。BlueZ 明确报告断开、监听源 UNAVAILABLE 或活动端口不可用时仍拒绝采集。
 
 ```bash
 # 指定输出的 monitor；不会设置系统默认设备。
@@ -110,7 +110,19 @@ python scripts/build_native.py --jobs 8
 python scripts/download_models.py
 ```
 
-构建固定在 [native-lock.json](config/native-lock.json) 的官方提交。已有 Whisper 也可通过 `--whisper-source /path/to/whisper.cpp` 指定。原工作树及其本地修改不会被覆盖。Vulkan 构建失败时保存错误并尝试 CPU，实际后端写入 `artifacts/native-runtime.toml`。只有 CPU 构建通过不代表 GPU 通过；需要使用该配置运行并记录真实识别。可用 `--no-cpu-fallback` 要求构建直接失败。
+构建固定在 [native-lock.json](config/native-lock.json) 的官方提交：Whisper v1.9.5 / `d1be6fde11ac`，llama.cpp 开发提交 `f5027fb21307`。源码放在 `vendor/NAME.cpp-COMMIT前12位/`，产物放在 `build/NAME-BACKEND-COMMIT前12位/`；新旧版本分别保存。原工作树及其本地修改不会被覆盖，复用已有仓库时只复制固定提交的 Git 对象并保留正确的版本信息。
+
+已下载官方源码时，可直接复用，省去重复下载：
+
+```bash
+python scripts/build_native.py --jobs 8 --backend vulkan --no-cpu-fallback \
+  --whisper-source "$HOME/AI/whisper.cpp-v1.9.5" \
+  --llama-source "$HOME/AI/llama.cpp-latest"
+```
+
+每次构建的日志分别保留在 `artifacts/native-build-logs/`，提交、产物和耗时写入 `artifacts/native-build.json`，候选运行配置写入 `artifacts/native-runtime.toml`。`--output-dir` 可将这些报告放到指定目录，`--lock` 可指定另一份固定提交清单。构建不会自动修改 `config/local.toml`；验证新版本后再更新本机配置中的可执行文件路径。
+
+Vulkan 构建失败时默认保存错误并尝试独立 CPU 构建，实际后端写入上述运行配置；`--no-cpu-fallback` 要求 Vulkan 失败即停止。只有 CPU 构建通过不代表 GPU 通过；需要使用该配置运行并记录真实识别。M2 连续字幕要求两个服务都使用 Vulkan。
 
 下载脚本匿名访问 Hugging Face，固定 [model-lock.json](config/model-lock.json) 的 revision，并核对远端公布的大小与 SHA-256。无需 Hugging Face 登录或 Token。下载失败保留 `.part`，重跑续传；最终权重仅在校验通过后发布到 models/，不提交 Git。已有损坏的最终文件会报错并保留。
 
@@ -189,7 +201,7 @@ python -m livetranslate demo --input normalized.wav --backend cpu
 env -u PYTHONPATH python -m pytest -q --junitxml=artifacts/pytest-unit.xml
 
 mkdir -p artifacts
-cp vendor/whisper.cpp/samples/jfk.wav artifacts/jfk.wav
+cp vendor/whisper.cpp-d1be6fde11ac/samples/jfk.wav artifacts/jfk.wav
 LIVETRANSLATE_REAL=1 env -u PYTHONPATH python -m pytest -q -m real --junitxml=artifacts/pytest-real.xml
 
 # 真正播放官方英语样本，捕获系统 monitor，再经过真实 Small.en 和 Qwen。

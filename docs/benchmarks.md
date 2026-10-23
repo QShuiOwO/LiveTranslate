@@ -2,6 +2,8 @@
 
 本文保留 M0/M1 的批次测量。M2 的真实 HDMI 连续采集、QLabel 绘制时延、30 分钟内存与队列结果见 [M2_BENCHMARKS.md](M2_BENCHMARKS.md)，两种时延口径不可互换。
 
+Whisper v1.9.5 与 llama.cpp 新提交的前后对比、当前运行版本及回归结果见 [NATIVE_UPGRADE.md](NATIVE_UPGRADE.md)。本文以下数值保留为原引擎的历史测量。
+
 测量日期：2026-10-22。Ryzen 7 9700X / RX 9070 XT (gfx1201) / Ubuntu 24.04。ASR Small.en，LLM Qwen3-4B-Instruct-2507 Q4_K_M；两个模型均真实本地推理，选择 Vulkan0 独显。
 
 ## 测量口径
