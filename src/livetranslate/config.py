@@ -73,8 +73,8 @@ class StreamConfig:
     inference_timeout_s: float = 4.0
     history_limit: int = 80
     font_size: int = 22
-    opacity: float = 0.96
-    theme: str = "dark"
+    opacity: float = 1.0
+    theme: str = "transparent"
 
 
 @dataclass(frozen=True)
@@ -144,8 +144,8 @@ def validate(config: Config) -> Config:
         if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
                 or not low <= value <= high or (isinstance(default, int) and not isinstance(value, int))):
             raise LiveTranslateError("config", f"stream.{name} must be {'an integer ' if isinstance(default, int) else ''}between {low} and {high}")
-    if stream.theme not in {"dark", "light"}:
-        raise LiveTranslateError("config", "Stream theme must be dark/light")
+    if stream.theme not in {"transparent", "dark", "light"}:
+        raise LiveTranslateError("config", "Stream theme must be transparent/dark/light")
     if stream.min_partial_ms >= stream.max_segment_ms or stream.min_speech_ms >= stream.end_silence_ms:
         raise LiveTranslateError("config", "Stream speech/partial duration must precede segment boundaries")
     return replace(config, translation=replace(t, base_url=local_base_url(t.base_url)))

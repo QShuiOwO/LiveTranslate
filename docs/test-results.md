@@ -1,5 +1,7 @@
 # M0/M1 完整测试结果
 
+当前 UI 更新：167 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试、12 项 GUI 测试）。新增透明 alpha/黑字、双区域缩放、框内滚动、历史跟随及临时/完成分区验证；另通过 35 秒真实 HDMI 可见字幕测试，4/4 完成双语绘制。证据目录：`artifacts/ui-transparent/`。
+
 本页保留 M1 的 69 项验收快照。原始 M2 验收为 107 项，后续系统输出跟随与蓝牙检测修复后为 120 项完整通过；真实连续字幕和异常恢复结果见 [M2_REPORT.md](M2_REPORT.md)。
 
 当前 Qwen3-ASR + HY-MT2 更新：160 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试）；另有 HDMI 回采和一分钟可见字幕验收。证据：`artifacts/qwen-hy-upgrade/pytest-final.xml`，详见 [模型切换报告](QWEN_HY_UPGRADE.md)。

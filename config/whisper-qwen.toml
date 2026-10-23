@@ -49,5 +49,5 @@ max_job_age_s = 6.0
 inference_timeout_s = 4.0
 history_limit = 80
 font_size = 22
-opacity = 0.96
-theme = "dark"
+opacity = 1.0
+theme = "transparent"
