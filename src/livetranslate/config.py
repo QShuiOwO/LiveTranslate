@@ -72,9 +72,9 @@ class StreamConfig:
     max_job_age_s: float = 6.0
     inference_timeout_s: float = 4.0
     history_limit: int = 80
-    font_size: int = 22
-    opacity: float = 1.0
-    theme: str = "transparent"
+    font_size: int = 16
+    opacity: float = 0.4
+    theme: str = "light"
 
 
 @dataclass(frozen=True)
@@ -137,7 +137,7 @@ def validate(config: Config) -> Config:
               "partial_interval_ms": (400, 5000), "min_partial_ms": (500, 5000),
               "max_segment_ms": (3000, 20000), "frame_queue_size": (10, 250), "final_queue_size": (1, 8),
               "max_job_age_s": (1, 30), "inference_timeout_s": (1, 15), "history_limit": (5, 200),
-              "font_size": (14, 36), "opacity": (0.4, 1)}
+              "font_size": (14, 36), "opacity": (0, 1)}
     for name, (low, high) in limits.items():
         value = getattr(stream, name)
         default = getattr(StreamConfig(), name)

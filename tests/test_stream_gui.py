@@ -49,10 +49,8 @@ def test_appearance_and_history_controls(window):
     assert w.draft.en.font().pointSize() == 30 and w.scroll.isVisible()
     assert w.final.isAncestorOf(w.scroll)
     assert abs(w.draft.height() - w.final.height()) <= 2
-    assert "#eef2f6" in w.styleSheet()
     w.theme.setCurrentIndex(2)
     app.processEvents()
-    assert "#111827" in w.styleSheet()
     w.show_history.setChecked(False)
     app.processEvents()
     assert not w.scroll.isVisible()
@@ -107,28 +105,111 @@ def test_short_bilingual_captions_fit_default_regions_without_scrollbars(window)
         assert not card.zh.visibleRegion().isEmpty()
 
 
-def test_default_theme_has_transparent_fill_and_black_subtitle_text(window):
+def rendered_window(w):
+    # Rendering for assertions must not affect actual presentation measurements.
+    w.setProperty("screenshot_render", True)
+    try:
+        return w.grab().toImage()
+    finally:
+        w.setProperty("screenshot_render", False)
+
+
+def pixel_at(image, point):
+    ratio = image.devicePixelRatio()
+    return image.pixelColor(round(point.x() * ratio), round(point.y() * ratio))
+
+
+def test_default_appearance_is_light_with_40_percent_background_and_16_point_text(window):
+    from PySide6.QtGui import QPalette
+    w, e, app = window
+    assert w.theme.currentText() == "浅色"
+    assert w.font_size.value() == 16
+    assert w.opacity.value() == 40
+    assert w.opacity.minimum() == 0 and w.opacity.maximum() == 100
+    assert w.opacity.isEnabled()
+    assert w.opacity_value.text() == "40%"
+    assert w.windowOpacity() == 1
+    for card in (w.draft, w.final):
+        for label in (card.en, card.zh):
+            assert label.font().pointSize() == 16
+            assert label.palette().color(QPalette.ColorRole.WindowText).name() == "#000000"
+
+
+@pytest.mark.parametrize("theme, background, foreground, border", [
+    (1, (238, 242, 246), (0, 0, 0), (89, 101, 121)),
+    (2, (17, 24, 39), (241, 245, 249), (148, 163, 184)),
+])
+@pytest.mark.parametrize("opacity", [0, 40, 100])
+def test_background_opacity_does_not_stack_or_fade_text_and_borders(
+        window, theme, background, foreground, border, opacity):
+    from PySide6.QtCore import QPoint
+    w, e, app = window
+    w.theme.setCurrentIndex(theme)
+    w.opacity.setValue(opacity)
+    w.draft.en.setText("MMMM Background opacity keeps subtitles readable.")
+    for _ in range(3):
+        app.processEvents()
+    assert w.windowOpacity() == 1
+    assert w.opacity_value.text() == f"{opacity}%"
+    rendered = rendered_window(w)
+    points = [QPoint(8, w.height() // 2), *(
+        card.mapTo(w, QPoint(card.width() // 2, card.height() - 18))
+        for card in (w.draft, w.final)
+    )]
+    for point in points:
+        color = pixel_at(rendered, point)
+        assert color.alpha() == round(255 * opacity / 100)
+        if opacity:
+            assert all(abs(actual - expected) <= 1
+                       for actual, expected in zip(color.getRgb()[:3], background))
+    # At zero background opacity the actual glyphs and straight border still paint
+    # fully opaque; global window opacity would incorrectly fade both together.
+    label_origin = w.draft.en.mapTo(w, QPoint(0, 0))
+    solid_text_pixels = [
+        pixel_at(rendered, label_origin + QPoint(x, y))
+        for x in range(min(w.draft.en.width(), 100))
+        for y in range(w.draft.en.height())
+    ]
+    assert any(color.getRgb() == (*foreground, 255) for color in solid_text_pixels)
+    border_colors = [
+        pixel_at(rendered, w.draft.mapTo(w, QPoint(x, w.draft.height() // 2)))
+        for x in range(3)
+    ]
+    assert any(color.getRgb() == (*border, 255) for color in border_colors)
+    job = SpeechJob(1, 1, b'', 1, 2, 3, monotonic_ns(), True)
+    w.caption(e.book.asr(job, "A completed sentence."))
+    w.caption(e.book.translation(TextJob(job, "A completed sentence.", monotonic_ns()), "一句完成的字幕。"))
+    w.show_history.setChecked(True)
+    for _ in range(3):
+        app.processEvents()
+    rendered = rendered_window(w)
+    viewport = w.scroll.viewport()
+    history_blank = viewport.mapTo(w, QPoint(viewport.width() // 2, viewport.height() - 12))
+    assert pixel_at(rendered, history_blank).alpha() == round(255 * opacity / 100)
+    history_card = w.history[1]
+    history_padding = history_card.mapTo(w, QPoint(history_card.width() // 2, history_card.height() - 8))
+    assert pixel_at(rendered, history_padding).alpha() == round(255 * opacity / 100)
+
+
+def test_transparent_theme_has_transparent_fill_and_black_subtitle_text(window):
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QPalette
     w, e, app = window
-    assert w.theme.currentIndex() == 0
+    w.theme.setCurrentIndex(0)
+    w.opacity.setValue(100)
+    app.processEvents()
     assert w.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     assert w.windowOpacity() == 1
     for card in (w.draft, w.final):
         for label in (card.en, card.zh):
             assert label.palette().color(QPalette.ColorRole.WindowText).name() == "#000000"
     # Inspect actual rendered alpha, not only a stylesheet containing "transparent".
-    w.setProperty("screenshot_render", True)
-    try:
-        rendered = w.grab().toImage()
-    finally:
-        w.setProperty("screenshot_render", False)
-    ratio = rendered.devicePixelRatio()
+    rendered = rendered_window(w)
     for point in [QPoint(1, 1), *(
         card.mapTo(w, QPoint(card.width() // 2, card.height() - 18))
         for card in (w.draft, w.final)
     )]:
-        assert rendered.pixelColor(round(point.x() * ratio), round(point.y() * ratio)).alpha() == 0
+        assert pixel_at(rendered, point).alpha() == 0
 
 
 def test_top_controls_and_both_caption_regions_resize_with_the_container(window):

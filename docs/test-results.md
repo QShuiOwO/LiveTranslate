@@ -1,6 +1,8 @@
 # M0/M1 完整测试结果
 
-当前 UI 更新：167 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试、12 项 GUI 测试）。新增透明 alpha/黑字、双区域缩放、框内滚动、历史跟随及临时/完成分区验证；另通过 35 秒真实 HDMI 可见字幕测试，4/4 完成双语绘制。证据目录：`artifacts/ui-transparent/`。
+背景不透明度调整：171 项无需模型测试通过（含 19 项 GUI 测试），3 项真实模型测试本次未重跑。默认浅色、16 号字、40% 背景；实际像素验证文字/边框不淡化，字幕区和历史区的背景 alpha 不叠加。结果：`artifacts/background-opacity/pytest.xml`。
+
+透明双区域 UI 初版：167 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试、12 项 GUI 测试）。新增透明 alpha/黑字、双区域缩放、框内滚动、历史跟随及临时/完成分区验证；另通过 35 秒真实 HDMI 可见字幕测试，4/4 完成双语绘制。证据目录：`artifacts/ui-transparent/`。
 
 本页保留 M1 的 69 项验收快照。原始 M2 验收为 107 项，后续系统输出跟随与蓝牙检测修复后为 120 项完整通过；真实连续字幕和异常恢复结果见 [M2_REPORT.md](M2_REPORT.md)。
 

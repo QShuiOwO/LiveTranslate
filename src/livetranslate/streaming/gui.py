@@ -221,15 +221,17 @@ class SubtitleWindow(QMainWindow):
         self.font_size = QSpinBox(); self.font_size.setRange(14, 36); self.font_size.setValue(engine.config.stream.font_size)
         self.font_size.setAccessibleName("字幕字号"); self.font_size.setFixedWidth(62)
         controls.addWidget(self.font_size)
-        controls.addWidget(QLabel("不透明度"))
-        self.opacity = QSlider(Qt.Orientation.Horizontal); self.opacity.setRange(40, 100)
+        controls.addWidget(QLabel("背景"))
+        self.opacity = QSlider(Qt.Orientation.Horizontal); self.opacity.setRange(0, 100)
         self.opacity.setFixedWidth(76); self.opacity.setValue(int(engine.config.stream.opacity * 100))
-        self.opacity.setAccessibleName("字幕窗口不透明度")
-        self.opacity.setToolTip("调整文字和边框的不透明度；透明主题的背景始终无填充")
-        if QApplication.instance().platformName().startswith("wayland"):
-            self.opacity.setEnabled(False)
-            self.opacity.setToolTip("当前 Wayland 合成器不支持整体不透明度调整；透明背景仍保持无填充")
+        self.opacity.setAccessibleName("背景不透明度")
+        self.opacity.setToolTip("仅调整背景不透明度，文字和边框保持清晰；透明主题始终无填充")
         controls.addWidget(self.opacity)
+        self.opacity_value = QLabel()
+        self.opacity_value.setFixedWidth(36)
+        self.opacity_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.opacity_value.setAccessibleName("背景不透明度百分比")
+        controls.addWidget(self.opacity_value)
         self.theme = QComboBox(); self.theme.addItems(["透明黑字", "浅色", "深色"])
         self.theme.setCurrentIndex({"transparent": 0, "light": 1, "dark": 2}[engine.config.stream.theme])
         self.theme.setAccessibleName("字幕主题"); self.theme.setMinimumWidth(96)
@@ -311,16 +313,20 @@ class SubtitleWindow(QMainWindow):
     def appearance(self, *args):
         transparent = self.theme.currentIndex() == 0
         dark = self.theme.currentIndex() == 2
+        alpha = round(self.opacity.value() * 255 / 100)
+        self.opacity.setEnabled(not transparent)
+        self.opacity_value.setText("0%" if transparent else f"{self.opacity.value()}%")
         if transparent:
-            background, card, text, border = "transparent", "transparent", "#000000", "rgba(0, 0, 0, 110)"
+            background, text, border = "transparent", "#000000", "rgba(0, 0, 0, 110)"
         elif dark:
-            background, card, text, border = "#111827", "#1e293b", "#f1f5f9", "#94a3b8"
+            background, text, border = f"rgba(17, 24, 39, {alpha})", "#f1f5f9", "#94a3b8"
         else:
-            background, card, text, border = "#eef2f6", "#ffffff", "#000000", "#596579"
+            background, text, border = f"rgba(238, 242, 246, {alpha})", "#000000", "#596579"
+        # Paint the background once; two translucent layers would turn 40% into 64% inside each card.
         self.setStyleSheet(f"""
         QWidget {{ background: transparent; color: {text}; }}
         QWidget#mainSurface {{ background: {background}; border-radius: 16px; }}
-        QFrame#draftCard, QFrame#finalCard {{ background: {card}; border: 1px solid {border}; border-radius: 20px; }}
+        QFrame#draftCard, QFrame#finalCard {{ background: transparent; border: 1px solid {border}; border-radius: 20px; }}
         QFrame#historyCard {{ background: transparent; border: none; border-bottom: 1px solid {border}; }}
         QLabel#brand {{ font-size: 15px; font-weight: 700; }}
         QLabel#badge {{ color: {text}; font-size: 12px; font-weight: 600; }}
@@ -343,8 +349,7 @@ class SubtitleWindow(QMainWindow):
         size = self.font_size.value()
         for card_widget in [self.draft, self.final, *self.history.values()]:
             card_widget.en.setFont(QFont("Noto Sans CJK SC", size))
-            card_widget.zh.setFont(QFont("Noto Sans CJK SC", size + 1))
-        if self.opacity.isEnabled(): self.setWindowOpacity(self.opacity.value() / 100)
+            card_widget.zh.setFont(QFont("Noto Sans CJK SC", size))
 
     def poll(self):
         handle = self.windowHandle()
@@ -408,7 +413,7 @@ class SubtitleWindow(QMainWindow):
         # Set font only on changed/new content; text updates do not rebuild the window.
         size = self.font_size.value()
         for card in ([self.history[uid]] if uid in self.history else []):
-            card.en.setFont(QFont("Noto Sans CJK SC", size)); card.zh.setFont(QFont("Noto Sans CJK SC", size+1))
+            card.en.setFont(QFont("Noto Sans CJK SC", size)); card.zh.setFont(QFont("Noto Sans CJK SC", size))
 
     def save_screenshot(self):
         if self.screenshot:
