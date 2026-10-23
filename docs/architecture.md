@@ -6,7 +6,7 @@
 CLI + TOML
   -> TranslationPipeline
        -> AudioCapture          LinuxAudioCapture (pactl + FFmpeg pulse)
-       -> ASRBackend            WhisperBackend (local whisper-cli)
+       -> ASRBackend            QwenASRBackend (speech.cpp) / WhisperBackend (whisper-cli)
        -> TranslationBackend    LlamaTranslator (127.0.0.1 HTTP)
 ```
 
@@ -24,7 +24,11 @@ FFmpeg 使用参数列表调用，不经过 shell，捕获 10–30 秒，输出 
 
 ## 本地模型与 GPU 证据
 
-Whisper 默认 Small.en，英文转录，不使用 Whisper 翻译任务。请求 Vulkan/HIP 时，适配器必须在日志中看到 GPU 后端初始化和权重分配；缺少证据即失败，不会把 CPU 回退当作 GPU 成功。Vulkan 软件驱动不算 GPU。CPU 后备由配置或命令行明确选择。
+当前默认 `asr.engine=qwen3` 通过 speech.cpp 加载 Qwen3-ASR-1.7B Q8_0。文件模式运行显式指定设备的 `speech asr`；连续模式启动常驻 `speech serve`，通过仅限回环地址的 `/v1/audio/transcriptions` 发送 PCM WAV。两者复用模型检查、设备检查及输出验证。设备枚举须证明硬件 GPU，模型加载日志须指向同一设备；真实响应须标记 `complete`，达到模型输出上限不能视为最终字幕。实际 GPU 验收还结合 CPU 对照和显存采样，见模型切换报告。
+
+ASR 工厂按配置显式选择引擎；不存在自动模型降级。旧配置缺省仍选择 Whisper，保留旧 M1/M2 行为。HY-MT2 在同一 LlamaTranslator 中通过 `prompt_style=hy_mt` 使用官方单条用户翻译指令；其余 HTTP、模型别名、截断和错误处理一致。
+
+Whisper 回退配置使用 Small.en，英文转录，不使用 Whisper 翻译任务。请求 Vulkan/HIP 时，适配器必须在日志中看到 GPU 后端初始化和权重分配；缺少证据即失败，不会把 CPU 回退当作 GPU 成功。Vulkan 软件驱动不算 GPU。CPU 后备由配置或命令行明确选择。
 
 llama-server 只绑定 `127.0.0.1`，显式使用本地 GGUF、固定模型别名、单槽、4096 context 和离线模式。启动器核验健康状态、权重缓冲及 GPU 层 offload 日志，保留 server-ready.json；退出时回收子进程。
 
@@ -38,6 +42,6 @@ GPU sysfs 采样间隔 100 ms，记录全设备显存基线、峰值、结束值
 
 `config/default.toml` 是可提交的便携配置，相对路径按 TOML 所在目录解析。CLI 的路径参数按当前工作目录解析并覆盖配置。`config/local.toml` 与 `*.local.toml` 被忽略，可存本机设备与绝对路径。未知字段和非法数值会报错，避免拼写错误被静默忽略。
 
-`config/native-lock.json` 固定官方原生源码 commit；`config/model-lock.json` 固定模型仓库 revision、大小和 SHA-256。下载不要求登录。构建脚本先检查已有官方 Whisper/llama 仓库，复制固定提交的 Git 对象到项目内构建，保留原工作树及其修改。源码、产物按 commit 分开保存，旧运行版本可回退；每次尝试的日志独立保存。Vulkan 编译失败会保存错误后尝试独立 CPU 构建，生成明确标注后端的候选配置，只有真实推理通过后才切换本机配置。当前升级结果见 [原生引擎升级报告](NATIVE_UPGRADE.md)。
+`config/native-lock.json` 固定原生源码上游 commit（包括社区 speech.cpp）；`config/model-lock.json` 固定模型仓库 revision、大小和 SHA-256。下载不要求登录。构建脚本先检查已有官方 Whisper/llama 仓库，复制固定提交的 Git 对象到项目内构建，保留原工作树及其修改。源码、产物按 commit 分开保存，旧运行版本可回退；每次尝试的日志独立保存。Vulkan 编译失败会保存错误后尝试独立 CPU 构建，生成明确标注后端的候选配置，只有真实推理通过后才切换本机配置。当前升级结果见 [原生引擎升级报告](NATIVE_UPGRADE.md)。
 
 pytest 单元和 Fake 集成测试不加载模型。真实模型测试需显式设置 `LIVETRANSLATE_REAL=1`；播放回采验收由 `scripts/validate_real.py` 完成，使用官方英语语音经真实输出设备播放，再捕获其 monitor。正弦波测试数据只用于单元测试，绝不用于真实模型验收。

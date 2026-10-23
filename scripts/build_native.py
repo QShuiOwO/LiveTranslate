@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned official sources in this project; preserve any external source tree."""
+"""Build pinned upstream sources in this project; preserve any external source tree."""
 
 import argparse
 import json
@@ -10,6 +10,9 @@ from time import perf_counter
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORIES = {"whisper": "https://github.com/ggml-org/whisper.cpp.git",
+                "llama": "https://github.com/ggml-org/llama.cpp.git",
+                "speech": "https://github.com/nyosegawa/speech.cpp.git"}
 
 
 def run(args, **kwargs):
@@ -17,8 +20,8 @@ def run(args, **kwargs):
 
 
 def revision(name, spec):
-    if name not in {"whisper", "llama"} or spec.get("repo") != f"https://github.com/ggml-org/{name}.cpp.git":
-        raise RuntimeError(f"Expected an official ggml-org repository for {name}")
+    if name not in REPOSITORIES or spec.get("repo") != REPOSITORIES[name]:
+        raise RuntimeError(f"Expected the official upstream repository for {name}")
     commit = spec.get("commit", "")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise RuntimeError(f"Expected a full pinned Git commit for {name}")
@@ -77,6 +80,9 @@ def build(name, spec, source, backend, jobs, output_dir):
         if spec.get("tag"):
             flags += ["-DWHISPER_BUILD_IS_DEV=OFF"]
         targets = ["whisper-cli", "whisper-server"]
+    elif name == "speech":
+        flags += ["-DGGML_OPENMP=OFF"]
+        targets = ["speech-cli"]
     else:
         flags += ["-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DLLAMA_BUILD_TOOLS=ON",
                   "-DLLAMA_BUILD_SERVER=ON", "-DLLAMA_BUILD_APP=OFF", "-DLLAMA_BUILD_UI=OFF", "-DLLAMA_BUILD_MTMD=OFF"]
@@ -96,6 +102,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--whisper-source", type=Path, default=Path.home() / "AI/whisper.cpp")
     p.add_argument("--llama-source", type=Path)
+    p.add_argument("--speech-source", type=Path)
     p.add_argument("--lock", type=Path, default=ROOT / "config/native-lock.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "artifacts")
     p.add_argument("--backend", choices=["vulkan", "cpu"], default="vulkan")
@@ -105,12 +112,17 @@ def main():
     if not 1 <= args.jobs <= 32:
         p.error("--jobs must be between 1 and 32")
     lock = json.loads(args.lock.read_text())
-    if set(lock) != {"whisper", "llama"}:
-        p.error("The native lock must contain whisper and llama")
+    if set(lock) not in ({"whisper", "llama"}, {"whisper", "llama", "speech"}):
+        p.error("The native lock must contain whisper and llama, optionally speech")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     results = {}
     for name, spec in lock.items():
-        source = prepare_source(name, spec, args.whisper_source if name == "whisper" else args.llama_source)
+        source = prepare_source(name, spec, getattr(args, name + "_source"))
+        if name == "speech":
+            run(["git", "-C", source, "submodule", "update", "--init", "--recursive"], timeout=600)
+            actual = run(["git", "-C", source / "ggml", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            if actual != spec.get("ggml_commit"):
+                raise RuntimeError("speech.cpp ggml submodule does not match native-lock.json")
         start = perf_counter()
         backend = args.backend
         failure = None
@@ -134,6 +146,15 @@ def main():
                f'model = "{ROOT}/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"\nbackend = "{l["backend"]}"\n'
                f'[stream]\nwhisper_server = "{w["directory"]}/bin/whisper-server"\n'
                f'[output]\ndirectory = "{ROOT}/artifacts"\n')
+    if "speech" in results:
+        a = results["speech"]
+        runtime = (f'[asr]\nengine = "qwen3"\nbinary = "{a["directory"]}/speech"\n'
+                   f'model = "{ROOT}/models/Qwen3-ASR-1.7B-Q8_0.gguf"\nbackend = "{a["backend"]}"\n'
+                   f'[translation]\nmodel = "Hy-MT2-7B-Q4_K_M"\nprompt_style = "hy_mt"\n'
+                   f'[server]\nbinary = "{l["directory"]}/bin/llama-server"\n'
+                   f'model = "{ROOT}/models/Hy-MT2-7B-Q4_K_M.gguf"\nbackend = "{l["backend"]}"\n'
+                   f'[stream]\nwhisper_server = "{w["directory"]}/bin/whisper-server"\n'
+                   f'[output]\ndirectory = "{ROOT}/artifacts"\n')
     runtime_path = args.output_dir / "native-runtime.toml"
     runtime_path.write_text(runtime)
     print(f"Native builds complete. Runtime config: {runtime_path}. GPU inference still requires real validation.")

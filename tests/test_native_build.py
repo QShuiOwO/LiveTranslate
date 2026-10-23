@@ -109,7 +109,7 @@ def test_failed_build_keeps_each_attempt_log_and_old_binary(tmp_path, monkeypatc
 def test_active_config_matches_pinned_builds():
     root = Path(__file__).resolve().parents[1]
     lock = json.loads((root / "config/native-lock.json").read_text())
-    config = load_config(root / "config/default.toml")
+    config = load_config(root / "config/whisper-qwen.toml")
     fallback = Config()
     for actual, relative, name, binary in [
         (config.asr.binary, fallback.asr.binary, "whisper", "whisper-cli"),
@@ -119,3 +119,7 @@ def test_active_config_matches_pinned_builds():
         expected = native.build_directory(name, lock[name], "vulkan") / "bin" / binary
         assert Path(actual) == expected
         assert root / relative == expected
+    current = load_config(root / "config/default.toml")
+    assert current.asr.engine == "qwen3"
+    assert Path(current.asr.binary) == native.build_directory("speech", lock["speech"], "vulkan") / "speech"
+    assert current.server.binary == config.server.binary

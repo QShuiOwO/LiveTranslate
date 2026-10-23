@@ -7,5 +7,10 @@
   "llama": {
     "repo": "https://github.com/ggml-org/llama.cpp.git",
     "commit": "f5027fb21307eb264aed483242603d68c87b0fe3"
+  },
+  "speech": {
+    "repo": "https://github.com/nyosegawa/speech.cpp.git",
+    "commit": "d074e1b9d84fe5ec530c959292ffe3d94ffd288b",
+    "ggml_commit": "cbdeccfd49ec9c702c175c273d36c47520cf4710"
   }
 }

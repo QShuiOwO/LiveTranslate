@@ -13,8 +13,9 @@ def run_live(config, *, source=None, duration=None, headless=False, output_dir=N
         raise LiveTranslateError("platform_unsupported", "M2 system capture currently supports Linux; no microphone mode is provided")
     if config.asr.backend != "vulkan" or config.server.backend != "vulkan":
         raise LiveTranslateError("stream_backend", "M2 uses the existing Vulkan models; M1 CPU commands remain available")
-    if config.stream.whisper_port == config.server.port:
-        raise LiveTranslateError("config", "Whisper/LLM ports must differ for live mode")
+    asr_port = config.asr.server_port if config.asr.engine == "qwen3" else config.stream.whisper_port
+    if asr_port == config.server.port:
+        raise LiveTranslateError("config", "ASR/LLM ports must differ for live mode")
     if duration is not None and not 1 <= duration <= 86400:
         raise LiveTranslateError("config", "Live duration must be between 1 and 86400 seconds")
     # Fail before opening session logs or starting threads when optional extras are absent.

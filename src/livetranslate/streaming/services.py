@@ -83,7 +83,7 @@ class NativeService:
             if self.reader: self.reader.join(timeout=1)
             self.tail.clear()
             env = {k: v for k, v in os.environ.items() if not k.startswith("LLAMA_ARG_")}
-            env.update(LC_ALL="C.UTF-8", LANG="C.UTF-8", HF_HUB_OFFLINE="1")
+            env.update(LC_ALL="C.UTF-8", LANG="C.UTF-8", HF_HUB_OFFLINE="1", SPEECH_NO_UPDATE_CHECK="1", NO_COLOR="1")
             try:
                 self.process = subprocess.Popen(self.args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 env=env, bufsize=0)
@@ -135,7 +135,43 @@ class NativeService:
                 self.handler.close()
 
 
-class PersistentWhisper:
+class PersistentASRHTTP:
+    def recognize(self, pcm):
+        self.service.ensure()
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+        boundary = "LiveTranslate" + uuid4().hex
+        body = bytearray()
+        for key, value in self.fields.items():
+            body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode())
+        body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="segment.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode())
+        body.extend(buffer.getvalue()); body.extend(f"\r\n--{boundary}--\r\n".encode())
+        request = Request(f"http://127.0.0.1:{self.service.port}{self.endpoint}", data=bytes(body),
+                          headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with self.opener.open(request, timeout=self.config.stream.inference_timeout_s) as response:
+                raw = response.read(1024 * 1024 + 1)
+                stop = response.headers.get("X-Speech-Stop") if self.config.asr.engine == "qwen3" else None
+            if len(raw) > 1024 * 1024: raise ValueError("oversized response")
+            data = json.loads(raw)
+            if self.config.asr.engine == "qwen3":
+                from ..backends.qwen_asr import transcript_text
+                return transcript_text(data, stop)
+            if not isinstance(data, dict): raise ValueError("expected JSON object")
+            text = data.get("text")
+            if not isinstance(text, str): raise ValueError("missing transcript text")
+            text = re.sub(r"\s+", " ", text).strip()
+            if not re.search(r"[A-Za-z]", text) or text.upper() in {"[BLANK_AUDIO]", "[SILENCE]"}: return ""
+            return text
+        except (OSError, ValueError, TypeError) as exc:
+            self.service.invalidate()
+            raise LiveTranslateError("stream_asr", f"Local {self.config.asr.engine} request failed: {exc}") from exc
+
+    def close(self): self.service.close()
+
+
+class PersistentWhisper(PersistentASRHTTP):
     def __init__(self, config, directory, status):
         if config.asr.backend != "vulkan":
             raise LiveTranslateError("stream_backend", "M2 currently validates Vulkan only; M1 CPU mode remains available")
@@ -150,36 +186,30 @@ class PersistentWhisper:
         self.service = NativeService("whisper", args, config.stream.whisper_port, directory, verify, status)
         self.config = config
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.endpoint = "/inference"
+        self.fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0", "language": "en"}
 
-    def recognize(self, pcm):
-        self.service.ensure()
-        buffer = io.BytesIO()
-        with wave.open(buffer, "wb") as w:
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
-        boundary = "LiveTranslate" + uuid4().hex
-        body = bytearray()
-        fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0", "language": "en"}
-        for key, value in fields.items():
-            body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode())
-        body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="segment.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode())
-        body.extend(buffer.getvalue()); body.extend(f"\r\n--{boundary}--\r\n".encode())
-        request = Request(f"http://127.0.0.1:{self.config.stream.whisper_port}/inference", data=bytes(body),
-                          headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-        try:
-            with self.opener.open(request, timeout=self.config.stream.inference_timeout_s) as response:
-                raw = response.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024: raise ValueError("oversized response")
-            data = json.loads(raw)
-            text = data.get("text")
-            if not isinstance(text, str): raise ValueError("missing transcript text")
-            text = re.sub(r"\s+", " ", text).strip()
-            if not re.search(r"[A-Za-z]", text) or text.upper() in {"[BLANK_AUDIO]", "[SILENCE]"}: return ""
-            return text
-        except (OSError, ValueError, TypeError) as exc:
-            self.service.invalidate()
-            raise LiveTranslateError("stream_asr", f"Local Whisper request failed: {exc}") from exc
 
-    def close(self): self.service.close()
+class PersistentQwen(PersistentASRHTTP):
+    def __init__(self, config, directory, status):
+        from ..backends.qwen_asr import MODEL_ID, backend_evidence as qwen_evidence, check_model, device_name, verify_device
+        model = check_model(config.asr)
+        device = verify_device(config.asr)
+        args = [config.asr.binary, "serve", str(model), "--device", device_name(config.asr),
+                "--threads", str(config.asr.threads), "--language", "en", "--host", "127.0.0.1",
+                "--port", str(config.asr.server_port)]
+        self.service = NativeService("qwen-asr", args, config.asr.server_port, directory,
+                                    lambda log: qwen_evidence(log, config.asr, device), status)
+        self.config = config
+        self.opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.endpoint = "/v1/audio/transcriptions"
+        self.fields = {"response_format": "json", "model": MODEL_ID, "language": "en"}
+
+
+def persistent_asr(config, directory, status):
+    if config.asr.engine == "qwen3":
+        return PersistentQwen(config, directory, status)
+    return PersistentWhisper(config, directory, status)
 
 
 class ManagedTranslator:

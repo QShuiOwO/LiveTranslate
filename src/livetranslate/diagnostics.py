@@ -77,7 +77,7 @@ def audit(config: Config, hip_smoke: bool = False) -> dict:
     command("compiler", ["c++", "--version"])
     command("git", ["git", "--version"])
     command("glslc", ["glslc", "--version"])
-    for name, path in [("whisper_binary", config.asr.binary), ("whisper_model", config.asr.model),
+    for name, path in [(f"{config.asr.engine}_binary", config.asr.binary), (f"{config.asr.engine}_model", config.asr.model),
                        ("llama_binary", config.server.binary), ("llama_model", config.server.model)]:
         p = Path(path)
         exists = p.is_file() or ("binary" in name and shutil.which(path) is not None)

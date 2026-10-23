@@ -18,12 +18,14 @@ class AudioConfig:
 
 @dataclass(frozen=True)
 class ASRConfig:
+    engine: str = "whisper"
     binary: str = "build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
     model: str = "models/ggml-small.en.bin"
     backend: str = "vulkan"
     device: int = 0
     threads: int = 8
     timeout: float = 180.0
+    server_port: int = 8083
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ class TranslationConfig:
     timeout: float = 120.0
     max_tokens: int = 256
     seed: int = 42
+    prompt_style: str = "subtitle"
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,7 @@ def validate(config: Config) -> Config:
         ("audio.duration", a.duration, 10, 30), ("audio.silence_dbfs", a.silence_dbfs, -100, -10),
         ("asr.timeout", w.timeout, 1, 3600), ("translation.timeout", t.timeout, 1, 3600),
         ("asr.device", w.device, 0, 32), ("asr.threads", w.threads, 1, 256),
+        ("asr.server_port", w.server_port, 1024, 65535),
         ("translation.max_tokens", t.max_tokens, 1, 1024), ("server.port", s.port, 1, 65535),
         ("server.context_size", s.context_size, 512, 32768), ("server.gpu_layers", s.gpu_layers, 0, 999),
         ("server.threads", s.threads, 1, 256),
@@ -111,7 +115,13 @@ def validate(config: Config) -> Config:
             raise LiveTranslateError("config", f"{name} must be between {lower} and {upper}")
     if w.backend not in {"vulkan", "hip", "cpu"} or s.backend not in {"vulkan", "hip", "cpu"}:
         raise LiveTranslateError("config", "Supported backends: vulkan, hip, cpu")
-    for value in [w.device, w.threads, t.max_tokens, t.seed, s.port, s.context_size, s.gpu_layers, s.threads]:
+    if w.engine not in {"whisper", "qwen3"}:
+        raise LiveTranslateError("config", "asr.engine must be whisper or qwen3")
+    if w.engine == "qwen3" and w.backend not in {"vulkan", "cpu"}:
+        raise LiveTranslateError("config", "Qwen3-ASR currently supports Vulkan or CPU through speech.cpp")
+    if t.prompt_style not in {"subtitle", "hy_mt"}:
+        raise LiveTranslateError("config", "translation.prompt_style must be subtitle or hy_mt")
+    for value in [w.device, w.threads, w.server_port, t.max_tokens, t.seed, s.port, s.context_size, s.gpu_layers, s.threads]:
         if isinstance(value, bool) or not isinstance(value, int):
             raise LiveTranslateError("config", "Token counts, device indices, seeds, ports and thread counts must be integers")
     if s.backend != "cpu" and s.gpu_layers == 0:
@@ -182,6 +192,6 @@ def load_config(path: Path | None = None, overrides: dict | None = None) -> Conf
                     p = Path(value).expanduser()
                     values[key] = str((base / p).resolve() if not p.is_absolute() else p)
         sections[section] = cls(**values)
-    if "whisper_server" not in merged.get("stream", {}):
+    if sections["asr"].engine == "whisper" and "whisper_server" not in merged.get("stream", {}):
         sections["stream"] = replace(sections["stream"], whisper_server=str(Path(sections["asr"].binary).with_name("whisper-server")))
     return validate(Config(**sections))

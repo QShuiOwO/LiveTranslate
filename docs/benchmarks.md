@@ -6,7 +6,11 @@ Whisper v1.9.5 与 llama.cpp 新提交的前后对比、当前运行版本及回
 
 测量日期：2026-10-22。Ryzen 7 9700X / RX 9070 XT (gfx1201) / Ubuntu 24.04。ASR Small.en，LLM Qwen3-4B-Instruct-2507 Q4_K_M；两个模型均真实本地推理，选择 Vulkan0 独显。
 
-## 测量口径
+## 当前 Qwen3-ASR + HY-MT2 短测
+
+2026-10-23，同一 RX 9070 XT / Vulkan。11 秒真实 JFK，各 3 次文件识别：GPU 中位 929.89 ms，CPU 2593.90 ms（均含进程与模型加载）。常驻 ASR 中位 167.10 ms；HY 翻译该识别文本中位 307.64 ms。两模型同时运行整卡显存峰值约 8.81 GiB。完整来源、GPU 执行证据、测试与限制见 [QWEN_HY_UPGRADE.md](QWEN_HY_UPGRADE.md)。这些处理时间不能替代字幕显示延迟。
+
+## 测量口径（以下为原 M1 历史结果）
 
 - Python 阶段耗时使用 perf_counter；单次 ASR 包括 WAV 校验、子进程与模型初始化、推理和输出解析。没有清空系统文件/着色器缓存，不能称作严格冷启动。
 - 翻译服务常驻，短句客户端耗时包含 health、模型别名检查、HTTP 和生成；temperature=0、top_k=1、seed=42、max_tokens=256、cache_prompt=false。

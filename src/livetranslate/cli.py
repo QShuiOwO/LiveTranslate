@@ -7,7 +7,7 @@ import sys
 from uuid import uuid4
 
 from .backends.llama import LlamaTranslator
-from .backends.whisper import WhisperBackend
+from .backends.factory import create_asr
 from .config import load_config
 from .errors import LiveTranslateError
 from .pipeline import TranslationPipeline
@@ -43,6 +43,7 @@ def main(argv=None) -> int:
             p.add_argument("--input", type=Path, required=name == "transcribe")
             p.add_argument("--asr-model", type=Path)
             p.add_argument("--asr-binary", type=Path)
+            p.add_argument("--asr-engine", choices=["whisper", "qwen3"])
             p.add_argument("--backend", choices=["vulkan", "hip", "cpu"])
             p.add_argument("--device", type=int)
         if name == "demo":
@@ -68,6 +69,7 @@ def main(argv=None) -> int:
         for option, section, key in [
             ("duration", "audio", "duration"), ("source", "audio", "source"),
             ("asr_model", "asr", "model"), ("asr_binary", "asr", "binary"),
+            ("asr_engine", "asr", "engine"),
             ("base_url", "translation", "base_url"), ("translation_model", "translation", "model"),
             ("max_tokens", "translation", "max_tokens"), ("model", "server", "model"),
             ("binary", "server", "binary"), ("port", "server", "port"),
@@ -96,14 +98,14 @@ def main(argv=None) -> int:
             result = capture_backend(config).capture(config.audio.duration, path, config.audio.source or None)
             json_path = path.with_suffix(".capture.json")
         elif args.command == "transcribe":
-            result = WhisperBackend(config.asr, output_dir, config.audio.silence_dbfs).transcribe(args.input)
+            result = create_asr(config.asr, output_dir, config.audio.silence_dbfs).transcribe(args.input)
             json_path = args.output or output_dir / (new_name("asr") + ".json")
         elif args.command == "translate":
             result = LlamaTranslator(config.translation).translate(args.text)
             json_path = args.output or output_dir / (new_name("translation") + ".json")
         else:
             pipeline = TranslationPipeline(None if args.input else capture_backend(config),
-                                           WhisperBackend(config.asr, output_dir, config.audio.silence_dbfs), LlamaTranslator(config.translation),
+                                           create_asr(config.asr, output_dir, config.audio.silence_dbfs), LlamaTranslator(config.translation),
                                            config.audio.silence_dbfs)
             audio = args.audio_output or output_dir / (new_name("capture") + ".wav")
             result = pipeline.run(input_file=args.input, duration=config.audio.duration,

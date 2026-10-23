@@ -7,23 +7,26 @@ source = ""
 silence_dbfs = -60.0
 
 [asr]
-binary = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
-model = "../models/ggml-small.en.bin"
+engine = "qwen3"
+server_port = 8083
+binary = "../build/speech-vulkan-d074e1b9d84f/speech"
+model = "../models/Qwen3-ASR-1.7B-Q8_0.gguf"
 backend = "vulkan"
 device = 0
 threads = 8
 timeout = 180.0
 
 [translation]
+prompt_style = "hy_mt"
 base_url = "http://127.0.0.1:8080"
-model = "Qwen3-4B-Instruct-2507-Q4_K_M"
+model = "Hy-MT2-7B-Q4_K_M"
 timeout = 120.0
 max_tokens = 256
 seed = 42
 
 [server]
 binary = "../build/llama-vulkan-f5027fb21307/bin/llama-server"
-model = "../models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+model = "../models/Hy-MT2-7B-Q4_K_M.gguf"
 port = 8080
 backend = "vulkan"
 device = "Vulkan0"

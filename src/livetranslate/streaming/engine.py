@@ -30,8 +30,8 @@ class LiveEngine:
             source = LinuxContinuousCapture(config.audio, status=self.status)
         self.source = source
         if asr is None or translator is None:
-            from .services import ManagedTranslator, PersistentWhisper
-            asr = asr or PersistentWhisper(config, self.directory, self.status)
+            from .services import ManagedTranslator, persistent_asr
+            asr = asr or persistent_asr(config, self.directory, self.status)
             translator = translator or ManagedTranslator(config, self.directory, self.status)
         self.asr, self.translator = asr, translator
         self.stop_event = threading.Event()

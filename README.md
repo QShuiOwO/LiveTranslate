@@ -1,12 +1,12 @@
 # LiveTranslate
 
-Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系统播放音频，以 whisper.cpp Small.en 识别，再通过本地 llama.cpp / Qwen3-4B-Instruct-2507 Q4_K_M 翻译。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
+Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系统播放音频，默认通过 speech.cpp / Qwen3-ASR-1.7B Q8_0 识别，再通过本地 llama.cpp / Hy-MT2-7B Q4_K_M 翻译。新版 whisper.cpp / Small.en 保留为可显式选择的回退配置。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
 
 真实验收状态见 [M0/M1 报告](docs/M0_M1_REPORT.md)，实测数据见 [性能报告](docs/benchmarks.md)，硬件与依赖见 [环境审计](docs/environment.md)。不要把 doctor 的设备枚举当成 GPU 推理验证。
 
-本次 M1 已通过真实 HDMI monitor 端到端验收；最终 pytest 69 项通过，包含真实模型测试。默认蓝牙输出已断开，该默认路径保留为失败。逐项结果见 [测试报告](docs/test-results.md)。
+原 M1 已通过真实 HDMI monitor 端到端验收；当时 pytest 69 项通过，包含真实模型测试。当时默认蓝牙输出已断开，该路径保留为失败。逐项结果见 [测试报告](docs/test-results.md)。
 
-M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收；系统输出跟随、蓝牙检测修复及原生引擎升级后，当前 137 项测试通过，包含 3 项真实模型测试。原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、原引擎的 30 分钟结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)；当前引擎版本、升级回归及性能对比见 [原生引擎升级报告](docs/NATIVE_UPGRADE.md)。
+原模型的 M2 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收。当前切换为 Qwen3-ASR + HY-MT2 后，160 项测试通过（含 3 项真实模型测试），另通过真实 HDMI 回采及一分钟可见字幕短测，8/8 最终双语字幕完成绘制；新组合按要求未做长测。当前结果见 [模型切换报告](docs/QWEN_HY_UPGRADE.md)。历史结果与测量方法见 [M2 报告](docs/M2_REPORT.md)、[M2 性能](docs/M2_BENCHMARKS.md) 与 [原生引擎升级报告](docs/NATIVE_UPGRADE.md)。
 
 ## M2 连续双语字幕
 
@@ -16,7 +16,7 @@ M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验�
 livetranslate-start
 ```
 
-该命令链接到项目的 `start.sh`，自动使用 `.conda/bin/python`，优先加载 `config/local.toml`（不存在时使用 `config/default.toml`），以 xcb / XWayland 打开窗口，并加载已有的项目内 Qt 库缓存。无需手动激活 Conda 或设置环境变量；Whisper 和 Qwen 服务自动启动，关闭窗口即释放程序拥有的服务。本机配置会跟随系统当前选中的声音输出。
+该命令链接到项目的 `start.sh`，自动使用 `.conda/bin/python`，优先加载 `config/local.toml`（不存在时使用 `config/default.toml`），以 xcb / XWayland 打开窗口，并加载已有的项目内 Qt 库缓存。无需手动激活 Conda 或设置环境变量；Qwen3-ASR 和 HY-MT2 服务自动启动，关闭窗口即释放程序拥有的服务。本机配置会跟随系统当前选中的声音输出。
 
 项目目录内也可直接执行 `./start.sh`。支持透传 `live` 的参数，例如 `livetranslate-start --duration 60` 或 `livetranslate-start --help`。相对路径按项目根目录解析；外部路径可传绝对路径。已有 `QT_QPA_PLATFORM` 设置时保留，可用于显式选择其他 Qt 平台。
 
@@ -27,20 +27,21 @@ mkdir -p "$HOME/.local/bin"
 ln -s "$PWD/start.sh" "$HOME/.local/bin/livetranslate-start"
 ```
 
-已有 M1 环境可直接安装附加依赖并构建同一提交的常驻 Whisper 服务，不更换模型或驱动：
+已有环境可安装附加依赖、构建固定版本的三个引擎，并下载当前模型：
 
 ```bash
 conda activate "$PWD/.conda"
 env -u PYTHONPATH python -m pip install -r config/live-requirements.lock
 env -u PYTHONPATH python -m pip install --no-build-isolation -e .
-python scripts/build_native.py --jobs 8
+python scripts/build_native.py --jobs 8 --no-cpu-fallback
+python scripts/download_models.py
 python -m livetranslate devices
 python -m livetranslate live --config config/local.toml
 ```
 
-也可安装 `python -m pip install -e '.[live]'`；固定版本见 `config/live-requirements.lock`。GUI 使用 PySide6-Essentials，不需要 Qt WebEngine、CUDA、额外 ASR/翻译模型或麦克风权限。Wayland 桌面可直接运行；X11 若 Qt 报缺少 xcb-cursor，安装 Ubuntu 的 `libxcb-cursor0`，无需修改显卡驱动。
+也可安装 `python -m pip install -e '.[live]'`；固定版本见 `config/live-requirements.lock`。GUI 使用 PySide6-Essentials，不需要 Qt WebEngine、CUDA 或麦克风权限。Wayland 桌面可直接运行；X11 若 Qt 报缺少 xcb-cursor，安装 Ubuntu 的 `libxcb-cursor0`，无需修改显卡驱动。
 
-启动后自动管理项目自己的本地 Whisper 服务（127.0.0.1:8082）与 Qwen 服务（127.0.0.1:8080）。已存在、健康的本地 Qwen 可复用，模型别名仍会核对；外部服务不会被本程序终止或擅自重启。程序自己启动的服务会在退出时释放。Whisper 服务必须在上述构建后可用；M1 的 whisper-cli 不受影响。
+启动后自动管理本地 Qwen3-ASR 服务（127.0.0.1:8083）与 HY-MT2 翻译服务（127.0.0.1:8080）。已存在、健康的本地 llama-server 可复用，模型别名仍会核对；外部服务不会被本程序终止或擅自重启。程序自己启动的服务会在退出时释放。Qwen3-ASR 由 speech.cpp 加载，不能由 whisper.cpp 加载；回退配置的 Whisper 服务使用 8082。
 
 窗口上部显示临时字幕，下部显示已确认英文及中文。英文确认后不再改写；中文只在完成翻译后确认。稳定的临时译文在英文继续增长时保留。字号、深浅主题、字幕历史和置顶提示可在窗口调整；历史最多保留配置指定的条数。Wayland 不支持窗口透明度时禁用该控件，置顶行为由桌面合成器决定。窗口可见期间使用临时桌面 idle inhibitor，退出即释放，不改变系统锁屏设置，也不解除手动锁屏。
 
@@ -70,7 +71,7 @@ python -m livetranslate live --config config/local.toml --headless --duration 60
 
 每次运行使用新的目录，保存 events.jsonl、模型日志、资源数据及 summary.json；默认目录自动命名。日志轮转，音频只在内存的有限帧/分段中处理，不连续写录音。状态栏会提示断开、恢复或旧任务丢弃。停止按钮、关闭窗口和 Ctrl+C 都会结束采集、排空有限队列并释放拥有的子进程。
 
-配置 `[stream]` 控制 VAD、停顿、临时识别间隔、最长分段、队列、超时和外观，见 [架构说明](docs/M2_ARCHITECTURE.md)。不含 `[stream]` 的旧 M1 配置继续可用，常驻 ASR 可执行文件默认从 whisper-cli 同目录推导。字幕延迟从 VAD 语音帧进入应用算到可见文字控件实际完成绘制；截图重绘和隐藏窗口不计入，详细测量边界见性能文档。
+配置 `[stream]` 控制 VAD、停顿、临时识别间隔、最长分段、队列、超时和外观，见 [架构说明](docs/M2_ARCHITECTURE.md)。旧 M1 配置继续可用：`[asr] engine` 缺省为 `whisper`，其常驻服务从 whisper-cli 同目录推导。当前默认配置显式设置 `engine = "qwen3"`、`server_port = 8083`，常驻和文件识别共用 speech 可执行文件。字幕延迟从 VAD 语音帧进入应用算到可见文字控件实际完成绘制；截图重绘和隐藏窗口不计入，详细测量边界见性能文档。
 
 真实 HDMI 自动验收会播放所给的英语文件：
 
@@ -110,7 +111,7 @@ python scripts/build_native.py --jobs 8
 python scripts/download_models.py
 ```
 
-构建固定在 [native-lock.json](config/native-lock.json) 的官方提交：Whisper v1.9.5 / `d1be6fde11ac`，llama.cpp 开发提交 `f5027fb21307`。源码放在 `vendor/NAME.cpp-COMMIT前12位/`，产物放在 `build/NAME-BACKEND-COMMIT前12位/`；新旧版本分别保存。原工作树及其本地修改不会被覆盖，复用已有仓库时只复制固定提交的 Git 对象并保留正确的版本信息。
+构建固定在 [native-lock.json](config/native-lock.json) 的上游提交：Whisper v1.9.5 / `d1be6fde11ac`，llama.cpp 开发提交 `f5027fb21307`，社区 speech.cpp v0.8.11 / `d074e1b9d84f`（其 ggml 子模块同样固定）。源码放在 `vendor/NAME.cpp-COMMIT前12位/`，产物放在 `build/NAME-BACKEND-COMMIT前12位/`；新旧版本分别保存。原工作树及其本地修改不会被覆盖，复用已有仓库时只复制固定提交的 Git 对象并保留正确的版本信息。
 
 已下载官方源码时，可直接复用，省去重复下载：
 
@@ -122,7 +123,7 @@ python scripts/build_native.py --jobs 8 --backend vulkan --no-cpu-fallback \
 
 每次构建的日志分别保留在 `artifacts/native-build-logs/`，提交、产物和耗时写入 `artifacts/native-build.json`，候选运行配置写入 `artifacts/native-runtime.toml`。`--output-dir` 可将这些报告放到指定目录，`--lock` 可指定另一份固定提交清单。构建不会自动修改 `config/local.toml`；验证新版本后再更新本机配置中的可执行文件路径。
 
-Vulkan 构建失败时默认保存错误并尝试独立 CPU 构建，实际后端写入上述运行配置；`--no-cpu-fallback` 要求 Vulkan 失败即停止。只有 CPU 构建通过不代表 GPU 通过；需要使用该配置运行并记录真实识别。M2 连续字幕要求两个服务都使用 Vulkan。
+Vulkan 构建失败时构建脚本默认保存错误并尝试独立 CPU 构建，实际后端写入上述运行配置；`--no-cpu-fallback` 要求 Vulkan 失败即停止。只有 CPU 构建通过不代表 GPU 通过；需要使用该配置运行并记录真实识别。M2 连续字幕要求两个服务都使用 Vulkan。
 
 下载脚本匿名访问 Hugging Face，固定 [model-lock.json](config/model-lock.json) 的 revision，并核对远端公布的大小与 SHA-256。无需 Hugging Face 登录或 Token。下载失败保留 `.part`，重跑续传；最终权重仅在校验通过后发布到 models/，不提交 Git。已有损坏的最终文件会报错并保留。
 
@@ -131,6 +132,22 @@ Vulkan 构建失败时默认保存错误并尝试独立 CPU 构建，实际后�
 ```bash
 CONDA_PKGS_DIRS="$PWD/.cache/conda-pkgs" conda create -p "$PWD/.conda" --file config/conda-linux-64.lock -y
 ```
+
+## 当前模型与回退
+
+Qwen3-ASR 使用 speech.cpp 专用布局的 `Qwen3-ASR-1.7B-Q8_0.gguf`，来源是该运行时作者发布的固定版本转换件；用户已有的官方 safetensors 文件继续保留。HY-MT2 使用腾讯官方 `Hy-MT2-7B-Q4_K_M.gguf`。文件大小约 2.18 GB 和 4.62 GB，运行显存还包含计算缓冲和 KV cache。来源与校验和见 `config/model-lock.json`。
+
+新组合的可行性、真实短测结果及限制见 [模型切换报告](docs/QWEN_HY_UPGRADE.md)。Qwen 的 Vulkan 实现通过应用层 VAD 分段实现临时/最终字幕，不等同于官方 vLLM 原生流式模式。HY-MT2 使用 `prompt_style = "hy_mt"` 的单条用户翻译指令；生成保持 temperature=0 和最多 256 tokens，以便字幕响应可比较。
+
+需要显式回退到新版 whisper.cpp + Small.en、llama.cpp + Qwen3-4B：
+
+```bash
+# 缺少旧权重时才下载；校验通过的已有文件直接复用。
+python scripts/download_models.py --lock config/whisper-model-lock.json
+livetranslate-start --config config/whisper-qwen.toml
+```
+
+回退通过配置手动选择，推理失败不会静默换模型。两套配置不要同时启动，以免争用翻译端口。
 
 ## 启动本地翻译服务
 
@@ -192,7 +209,7 @@ python -m livetranslate demo --config config/local.toml --input normalized.wav
 python -m livetranslate demo --input normalized.wav --backend cpu
 ```
 
-主要覆盖参数：`--source`、`--duration`、`--asr-model`、`--asr-binary`、`--backend`、`--device`、`--base-url`、`--translation-model`、`--max-tokens`。服务端另支持 `--model`、`--binary`、`--port`。API 默认 max_tokens=256、temperature=0、seed=42；达到 token 上限会报告不完整翻译。
+主要覆盖参数：`--source`、`--duration`、`--asr-engine`、`--asr-model`、`--asr-binary`、`--backend`、`--device`、`--base-url`、`--translation-model`、`--max-tokens`。服务端另支持 `--model`、`--binary`、`--port`。API 默认 max_tokens=256、temperature=0、seed=42；达到 token 上限会报告不完整翻译。
 
 ## 测试和真实验收
 
@@ -217,4 +234,4 @@ Vulkan、PulseAudio socket 或 `/dev/dri` 在隔离执行沙箱内不可见时�
 
 ## 交付范围
 
-接口与边界见 [M1 架构文档](docs/architecture.md) 和 [M2 架构文档](docs/M2_ARCHITECTURE.md)。权重、音频样本、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流和字幕状态机不绑定 Linux；没有麦克风输入、HIP 适配或模型替换。
+接口与边界见 [M1 架构文档](docs/architecture.md) 和 [M2 架构文档](docs/M2_ARCHITECTURE.md)。权重、音频样本、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流和字幕状态机不绑定 Linux；没有麦克风输入或 HIP 适配。当前仍以英语输入、简体中文输出验收；多语言模型的存在不代表已完成多语言字幕逻辑。

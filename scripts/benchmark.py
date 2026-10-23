@@ -8,7 +8,7 @@ import statistics
 
 from _bootstrap import ROOT
 from livetranslate.backends.llama import LlamaTranslator
-from livetranslate.backends.whisper import WhisperBackend
+from livetranslate.backends.factory import create_asr
 from livetranslate.config import load_config
 from livetranslate.results import save_json
 
@@ -33,7 +33,7 @@ def main():
     cfg = load_config(args.config)
     results = {}
     for name, backend in [("asr_gpu", cfg.asr), ("asr_cpu", replace(cfg.asr, backend="cpu"))]:
-        engine = WhisperBackend(backend, Path(cfg.output.directory), cfg.audio.silence_dbfs)
+        engine = create_asr(backend, Path(cfg.output.directory), cfg.audio.silence_dbfs)
         results[name] = group([engine.transcribe(args.input) for _ in range(args.iterations)])
         print(f"{name}: success={results[name]['success']}, median={results[name]['median_ms']} ms", flush=True)
     translator = LlamaTranslator(cfg.translation)

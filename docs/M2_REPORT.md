@@ -2,7 +2,11 @@
 
 日期：2026-10-23；应用版本 0.2.0，基于 M1 `ea9dd8f1`。**M2 在 Ubuntu 24.04、真实 HDMI monitor、Qt xcb / XWayland 与两个 Vulkan 本地模型的条件下通过验收。** 原生 Wayland 全程曝光未通过，作为显示平台限制保留。
 
-## 范围
+## 当前模型更新
+
+默认已切换为 Qwen3-ASR-1.7B Q8_0 + HY-MT2-7B Q4_K_M，使用 Vulkan；完整 160 项测试、真实 HDMI 回采和一分钟 8/8 可见双语字幕短测通过。仅原 Small.en + Qwen3-4B 组合拥有本文的 30 分钟验收。当前组合的兼容方式、短测性能、失败记录及限制见 [QWEN_HY_UPGRADE.md](QWEN_HY_UPGRADE.md)。
+
+## 原 M2 范围
 
 在 M1 commit `ea9dd8f1` 上增加连续系统播放音频、WebRTC VAD、常驻 Small.en Vulkan、异步 Qwen 翻译与原生 Qt 双语字幕。未增加麦克风、HIP 推理或其他模型。Windows 采集仍未实现，连续音频与字幕状态机保留平台接口。
 

@@ -2,7 +2,9 @@
 
 本页保留 M1 的 69 项验收快照。原始 M2 验收为 107 项，后续系统输出跟随与蓝牙检测修复后为 120 项完整通过；真实连续字幕和异常恢复结果见 [M2_REPORT.md](M2_REPORT.md)。
 
-最终运行：69 tests，0 failures，0 errors，0 skipped。
+当前 Qwen3-ASR + HY-MT2 更新：160 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试）；另有 HDMI 回采和一分钟可见字幕验收。证据：`artifacts/qwen-hy-upgrade/pytest-final.xml`，详见 [模型切换报告](QWEN_HY_UPGRADE.md)。
+
+原 M1 最终运行：69 tests，0 failures，0 errors，0 skipped。
 
 命令：`LIVETRANSLATE_REAL=1 env -u PYTHONPATH python -m pytest -q --junitxml=artifacts/pytest-all.xml`。最终运行 69 项全部通过，其中 66 项单元/Fake 集成测试、3 项真实本地模型测试。未启用真实测试的早期运行明确跳过 real 用例，不作为最终验收。
 

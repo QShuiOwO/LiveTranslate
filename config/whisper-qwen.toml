@@ -1,0 +1,53 @@
+# Relative paths are resolved against this file's parent (config/).
+[audio]
+ffmpeg = "ffmpeg"
+pactl = "pactl"
+duration = 15.0
+source = ""
+silence_dbfs = -60.0
+
+[asr]
+binary = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
+model = "../models/ggml-small.en.bin"
+backend = "vulkan"
+device = 0
+threads = 8
+timeout = 180.0
+
+[translation]
+base_url = "http://127.0.0.1:8080"
+model = "Qwen3-4B-Instruct-2507-Q4_K_M"
+timeout = 120.0
+max_tokens = 256
+seed = 42
+
+[server]
+binary = "../build/llama-vulkan-f5027fb21307/bin/llama-server"
+model = "../models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+port = 8080
+backend = "vulkan"
+device = "Vulkan0"
+context_size = 4096
+gpu_layers = 99
+threads = 8
+
+[output]
+directory = "../artifacts"
+
+[stream]
+whisper_server = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-server"
+whisper_port = 8082
+vad_mode = 2
+vad_floor_dbfs = -52.0
+end_silence_ms = 560
+partial_interval_ms = 1000
+min_partial_ms = 1200
+max_segment_ms = 10000
+frame_queue_size = 100
+final_queue_size = 3
+max_job_age_s = 6.0
+inference_timeout_s = 4.0
+history_limit = 80
+font_size = 22
+opacity = 0.96
+theme = "dark"

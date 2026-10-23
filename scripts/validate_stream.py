@@ -20,6 +20,7 @@ def main():
     p.add_argument("--speech", type=Path, default=ROOT / "artifacts/jfk.wav")
     p.add_argument("--duration", type=float, default=35)
     p.add_argument("--output-dir", type=Path, required=True)
+    p.add_argument("--launcher", type=Path, help="Exercise the public launcher instead of calling Python directly")
     p.add_argument("--require-soak", action="store_true")
     args = p.parse_args()
     if args.require_soak and args.duration < 1830: p.error("Use at least 1830 seconds for a 30-minute capture after service warmup")
@@ -33,7 +34,8 @@ def main():
     start_ns = None
     playback_terminated = False
     with (args.output_dir / "app.log").open("w") as log:
-        app = subprocess.Popen([sys.executable, "-m", "livetranslate", "live", "--config", str(args.config),
+        command = [str(args.launcher.resolve())] if args.launcher else [sys.executable, "-m", "livetranslate", "live"]
+        app = subprocess.Popen([*command, "--config", str(args.config.resolve()),
                                 "--duration", str(args.duration), "--output-dir", str(args.output_dir),
                                 "--screenshot", str(args.output_dir / "subtitles.png")], stdout=log, stderr=log, env=env)
         try:

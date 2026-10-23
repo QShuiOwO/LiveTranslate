@@ -1,22 +1,25 @@
 {
   "asr": {
-    "repo": "ggerganov/whisper.cpp",
-    "filename": "ggml-small.en.bin",
-    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
-    "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
-    "size": 487614201,
-    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
-    "source": "https://huggingface.co/ggerganov/whisper.cpp",
-    "authentication": "anonymous"
+    "repo": "sakasegawa/Qwen3-ASR-1.7B-GGUF",
+    "filename": "Qwen3-ASR-1.7B-Q8_0.gguf",
+    "revision": "81e2423d24073cdeeccb5951df16accc89e075a2",
+    "sha256": "5f219b78a1d9c3b9e97da27708b36f8a0bc1bfc1650b541c0a6dbaf87c9a62d0",
+    "size": 2176109216,
+    "url": "https://huggingface.co/sakasegawa/Qwen3-ASR-1.7B-GGUF/resolve/81e2423d24073cdeeccb5951df16accc89e075a2/Qwen3-ASR-1.7B-Q8_0.gguf",
+    "source": "https://huggingface.co/sakasegawa/Qwen3-ASR-1.7B-GGUF",
+    "authentication": "anonymous",
+    "upstream": "Qwen/Qwen3-ASR-1.7B",
+    "format": "speech.cpp layout 1, Q8_0",
+    "upstream_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5"
   },
   "translation": {
-    "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
-    "filename": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-    "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
-    "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
-    "size": 2497281120,
-    "url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-    "source": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF",
+    "repo": "tencent/Hy-MT2-7B-GGUF",
+    "filename": "Hy-MT2-7B-Q4_K_M.gguf",
+    "revision": "ab8472660ac61fac25f1af43fac2599d52a8a775",
+    "sha256": "9f96256500f3fc1ab4d64336b58f52a949a95ad7516b0c229476eef782f9f77b",
+    "size": 4624648896,
+    "url": "https://huggingface.co/tencent/Hy-MT2-7B-GGUF/resolve/ab8472660ac61fac25f1af43fac2599d52a8a775/Hy-MT2-7B-Q4_K_M.gguf",
+    "source": "https://huggingface.co/tencent/Hy-MT2-7B-GGUF",
     "authentication": "anonymous"
   }
 }

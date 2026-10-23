@@ -31,6 +31,13 @@ class LlamaTranslator:
         # Never inherit HTTP(S)_PROXY for private text, and never follow redirects.
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
+    def messages(self, text: str) -> list[dict]:
+        if self.config.prompt_style == "hy_mt":
+            # HY-MT uses a translation instruction in the user turn and no default system prompt.
+            return [{"role": "user", "content":
+                     "将以下文本翻译为简体中文，注意只需要输出翻译后的结果，不要额外解释：\n\n" + text}]
+        return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": text}]
+
     def request(self, path: str, body: dict | None = None) -> dict:
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         req = Request(self.base_url + path, data=payload,
@@ -78,7 +85,7 @@ class LlamaTranslator:
             with sampler:
                 data = self.request("/v1/chat/completions", {
                     "model": self.config.model,
-                    "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": text}],
+                    "messages": self.messages(text),
                     "temperature": 0.0, "top_p": 1.0, "top_k": 1, "seed": self.config.seed,
                     "max_tokens": self.config.max_tokens, "stream": False, "cache_prompt": False,
                 })

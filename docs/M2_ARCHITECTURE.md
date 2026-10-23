@@ -1,16 +1,16 @@
 # M2 连续系统音频与字幕
 
-M1 的 AudioCapture、WhisperBackend、LlamaTranslator、TranslationPipeline 继续服务批次命令。M2 新增 streaming/ 和 LinuxContinuousCapture；连续接口不依赖 Qt 或具体音频系统。模型、量化、官方原生源码提交沿用 M1。
+M1 的 AudioCapture、ASRBackend、LlamaTranslator、TranslationPipeline 继续服务批次命令。M2 使用 streaming/ 和 LinuxContinuousCapture；连续接口不依赖 Qt 或具体音频系统。当前默认 Qwen3-ASR-1.7B + HY-MT2-7B，Whisper + Qwen3-4B 作为显式回退配置保留。原始 M2 长测对应旧模型，当前模型切换仅做短测。
 
 ```text
 LinuxContinuousCapture (monitor only, FFmpeg PCM20ms)
    -> bounded frame queue (100 frames / 2s)
    -> WebRTC VAD + energy floor, bounded utterance (<=10s)
    -> ASR queue (3 finals + 1 latest draft)
-   -> persistent local whisper-server /inference
+   -> persistent local speech.cpp /v1/audio/transcriptions (or whisper-server /inference)
    -> CaptionBook / EventBus -> Qt main-thread widgets
    -> translation queue (3 finals + 1 latest draft)
-   -> local Qwen Chat Completions -> same caption ID
+   -> local HY-MT2 Chat Completions -> same caption ID
 ```
 
 ## 分段、任务和缓冲
@@ -33,9 +33,15 @@ CaptionBook 对每段使用单调 ID 与 revision。临时结果可更新，英�
 
 ## 服务与恢复
 
+默认常驻 Qwen3-ASR 由 speech.cpp 运行，绑定 127.0.0.1:8083；启动时显式选择 Vulkan0、验证硬件设备身份和加载模型的设备日志，并执行引擎默认 warmup。HTTP 上传 WAV，指定模型及英语，只接受 `X-Speech-Stop: complete`。speech.cpp 不接受 Whisper 的 temperature 等字段，两套 HTTP 适配器使用各自的请求协议。原生服务最长启动等待 30 秒，请求仍受 4 秒超时与有限队列约束。无需官方 Python/Torch/vLLM，也不调用远程推理服务；应用分段式临时识别不等同于官方原生流式。
+
+翻译默认 HY-MT2-7B Q4_K_M，由新版 llama.cpp 绑定 127.0.0.1:8080。通过 HY-MT 的用户翻译指令生成简体中文，temperature=0、最多 256 tokens；模型原始推荐采样参数与本项目确定性字幕参数不同。
+
+以下 Whisper 协议适用于回退配置：
+
 使用同一 Whisper 提交新建常驻 Vulkan whisper-server，只绑定 127.0.0.1:8082，接收内存 WAV multipart。固定源码默认 no_context=true，每次请求使用独立文本上下文；该提交不接受 README 里遗留的 -nc 参数，因此不传。temperature 和 temperature_inc 都为 0，禁用非语音 token，不在服务上启用 FFmpeg 上传转换。
 
-Qwen 仍是 M1 的 llama.cpp、本地 GGUF、单槽与离线模式。HTTP 客户端均禁用代理、拒绝重定向。启动前验证 GPU 权重日志，Whisper 仍拒绝软件 Vulkan。已存在的健康本地 Qwen 可复用，但要校验模型别名；不拥有的服务不终止、不自动重启，GPU 证据需由外部启动者提供。自有进程异常后按需重建，最终任务在未过期时最多重试一次；失败显示状态，不用假结果填补。
+两个翻译模型均沿用 llama.cpp、本地 GGUF、单槽与离线模式。HTTP 客户端均禁用代理、拒绝重定向。启动前验证 GPU 权重日志，Whisper 仍拒绝软件 Vulkan。已存在的健康本地 llama-server 可复用，但要校验模型别名；不拥有的服务不终止、不自动重启，GPU 证据需由外部启动者提供。自有进程异常后按需重建，最终任务在未过期时最多重试一次；失败显示状态，不用假结果填补。
 
 停止先关闭采集，VAD 刷新尾段，排空有限 ASR/翻译任务，然后结束拥有的原生进程并回收日志线程。GUI 等收尾结束后再保存报告。外部服务保持运行。GUI 可见时通过专属 D-Bus 连接申请临时 idle inhibitor；关闭连接释放，不改变系统设置、不解锁桌面。
 
