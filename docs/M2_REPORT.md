@@ -110,3 +110,13 @@ python scripts/validate_real.py --config artifacts/m2-regression-final.local.tom
 ## 测试边界与限制
 
 显示时延仅覆盖应用接收音频到可见 QLabel 绘制，不覆盖最初 Pulse/HDMI 缓冲和物理面板延迟。公开人声的识别、专有名词译法和强制分段边界仍受现有模型与启发式分段限制，未进行完整 WER 或翻译质量打分。恢复测试终止本程序的子进程，没有实际拔掉物理 HDMI；物理热拔插仍未验证。Windows、麦克风、HIP 与模型替换均在本轮范围外。
+
+## 后续修复：跟随系统选中的输出
+
+随后按用户选择适配系统默认输出，本地配置改为 source 为空。连续采集每 2 秒检查当前默认输出，发现变化则重新连接新 monitor，显式指定的源仍固定。没有设置系统默认设备或切换蓝牙 profile。
+
+发现 PipeWire 的蓝牙元数据报告 disconnected，而系统 BlueZ Device1 Connected 实际为 true。先前仅依据 PipeWire 给出的“耳机已断开”判断不充分；历史报告中的断开字段应理解为当时的 PipeWire 报告，不能据此断言物理设备一定断开。修复以 BlueZ 的只读 Connected/Alias 查询更新蓝牙状态与名称；真正断开、源 UNAVAILABLE 和不可用端口仍会被拒绝。
+
+追加验证：artifacts/output-follow-bluetooth-01，真实英语定向播放到当前默认蓝牙耳机，从其 monitor 捕获 34.26 秒 PCM，由 Small.en/Qwen Vulkan 产生 4 条最终双语字幕，真实 xcb 窗口绘制与退出均通过，零推理错误、零音频丢弃、无遗留线程。双模型由本次运行启动，全部本地推理。系统默认输出切换逻辑通过模拟设备列表的自动化用例验证；没有更改全局默认设备来做物理切换测试，也没有为此修复重做 30 分钟长测。
+
+当前完整回归为 **120 passed，0 skipped**（含 3 项真实模型），JUnit 为 artifacts/output-follow-all.xml。新增 13 项覆盖蓝牙状态双向纠正、中文名称、无效/缺失 D-Bus 回退、查询路径、枚举整合、自动输出变化与显式固定源。初次在短测结束后运行真实测试时，受管 llama-server 已退出，2 项报告 connection refused；保留 output-follow-all.service-stopped.xml，使用专用服务重新运行后 120 项通过。本机配置和蓝牙设备标识只保留在被忽略的 config/local.toml、artifacts/ 中。

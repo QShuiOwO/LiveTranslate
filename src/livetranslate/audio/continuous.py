@@ -33,6 +33,11 @@ class LinuxContinuousCapture:
             except subprocess.TimeoutExpired:
                 p.kill(); p.wait()
 
+    def _check_monitor(self, previous):
+        current = select_monitor(LinuxAudioCapture(self.config).enumerate_monitors(), self.source)
+        if current.name != previous.name:
+            raise LiveTranslateError("audio_default_changed", f"System output changed; following monitor: {current.name}")
+
     def frames(self, stop):
         epoch, sequence, backoff = 0, 0, 0.5
         while not stop.is_set():
@@ -81,7 +86,7 @@ class LinuxContinuousCapture:
                         if monotonic() - last_read > 3:
                             raise LiveTranslateError("capture_stalled", "No PCM frames for 3 seconds")
                         if monotonic() >= next_check:
-                            select_monitor(LinuxAudioCapture(self.config).enumerate_monitors(), monitor.name)
+                            self._check_monitor(monitor)
                             next_check = monotonic() + 2
                         if p.poll() is not None:
                             raise LiveTranslateError("capture_exited", f"FFmpeg exited {p.returncode}: {''.join(errors)[-1500:]}")

@@ -17,6 +17,8 @@ LinuxContinuousCapture (monitor only, FFmpeg PCM20ms)
 
 音频固定为 16 kHz、单声道 PCM16，20 ms/帧。复用 M1 的 pactl monitor 识别、默认输出优先及显式源覆盖；没有麦克风入口。FFmpeg fragment_size=640，flush_packets=1，独立线程用 selector 读取 PCM 和有界 stderr；无数据 3 秒或源检查失败后重新枚举相同目标，按 0.5–5 秒退避重连。没有全局音频配置写入。
 
+后续输出适配：source 为空时，2 秒设备检查重新选择当前系统默认输出；发现 monitor 改变则回收旧 FFmpeg，重连新源并更新 epoch，由既有缺口处理切断上下文。显式 source 始终固定。蓝牙输出通过 busctl/BlueZ Device1 GetAll 只读取得 Connected 与 Alias，覆盖 PipeWire 可能陈旧的蓝牙字段；每个设备单次枚举只查询一次，超时 2 秒，查询失败时回退 pactl 信息。source UNAVAILABLE 和不可用硬件端口仍会阻止采集。
+
 WebRTC VAD mode=2，附加默认 -52 dBFS 能量门限；所有帧均送入 VAD 状态机。保留 200 ms 前导，至少 240 ms 有声才处理，560 ms 停顿结束一段，最终音频仅留最后有声帧后 160 ms。每 1 秒尝试临时识别，最小窗口 1.2 秒；持续说话最多 10 秒强制分段。强制边界不做音频重叠，因此不会从重叠窗口重复提交同一采样；边界可能拆词，属于当前质量限制。
 
 采集、VAD、ASR、翻译各用一个工作线程；UI 仅在主线程用 33 ms timer 合并事件。帧队列溢出丢最旧帧，sequence/epoch 变化切断上下文。ASR/翻译队列优先最终任务，只保留最新临时任务；最终队列满时明确丢最旧并显示缺口。任务排队超过 6 秒会过期，避免无限追赶旧音频。每个分段、队列、缓存、UI 历史和统计采样都有容量上限。

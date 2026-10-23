@@ -6,7 +6,7 @@ Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系�
 
 本次 M1 已通过真实 HDMI monitor 端到端验收；最终 pytest 69 项通过，包含真实模型测试。默认蓝牙输出已断开，该默认路径保留为失败。逐项结果见 [测试报告](docs/test-results.md)。
 
-M2 已在 HDMI + xcb / XWayland + Vulkan 路径完成超过 30 分钟真实验收，107 项测试通过；原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、30 分钟运行结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)。
+M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收；后续系统输出跟随与蓝牙检测修复后，当前 120 项测试通过。原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、30 分钟运行结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)。
 
 ## M2 连续双语字幕
 
@@ -36,6 +36,10 @@ env -u PYTHONPATH QT_QPA_PLATFORM=xcb \
 ```
 
 缓存重建步骤和实际验证结果见 [M2 报告](docs/M2_REPORT.md)。这里只切换 Qt 显示平台，两类模型仍在同一 RX 9070 XT 上以 Vulkan 推理。
+
+`[audio] source = ""` 会监听 Ubuntu“声音输出”当前选中设备的 monitor。连续运行中约每 2 秒检查默认输出，切换输出后结束旧采集、重连新 monitor 并切断旧音频上下文。配置固定的 monitor 名称或传入 `--source` 时保持固定设备。程序只读取系统的输出选择。
+
+蓝牙设备的连接状态与名称通过可用的 `busctl` 只读查询 [BlueZ Device1](https://github.com/bluez/bluez/blob/master/doc/org.bluez.Device.rst)，避免 PipeWire 缓存的旧 `api.bluez5.connection` 字段把实际连接的耳机误判为断开。BlueZ 查询不可用时保留 pactl 的检测结果。
 
 ```bash
 # 指定输出的 monitor；不会设置系统默认设备。
@@ -138,7 +142,7 @@ python -m livetranslate demo --duration 15 --source MONITOR_NAME
 
 M1 验收时默认蓝牙输出已断开，真实测试通过显式选择已连接 HDMI 的 monitor 完成。M2 继续使用显式 HDMI 源，开发过程没有设置系统默认设备。当前设备名应重新枚举，不能照抄其他机器的音频源。
 
-本机已生成被 Git 忽略的 `config/local.toml`，选择本次验证的 HDMI 源，可直接用 `python -m livetranslate demo --config config/local.toml --duration 15`。全新检出时需自行选择可用源。
+本机配置 `config/local.toml` 被 Git 忽略；当前设为 `source = ""`，跟随系统选中的声音输出，可直接用 `python -m livetranslate demo --config config/local.toml --duration 15`。全新检出可使用默认配置的自动选择，或自行指定 monitor。
 
 录音必须为 16 kHz、Mono、PCM16 WAV，拒绝空音频、静音、截断和采集失败。已有文件可先转换：
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import math
 import os
+import re
 from pathlib import Path
 import tempfile
 from time import perf_counter
@@ -25,7 +26,36 @@ class MonitorSource:
     connected: bool
 
 
-def parse_monitors(sources: list[dict], sinks: list[dict], default_sink: str) -> list[MonitorSource]:
+@dataclass(frozen=True)
+class BluetoothDeviceState:
+    connected: bool
+    alias: str
+
+
+def bluetooth_device_state(path: str) -> BluetoothDeviceState | None:
+    """Read BlueZ directly: PipeWire may retain stale Bluetooth device properties."""
+    if not isinstance(path, str) or not re.fullmatch(r"/org/bluez/hci\d+/dev_(?:[0-9A-Fa-f]{2}_){5}[0-9A-Fa-f]{2}", path):
+        return None
+    try:
+        raw = json.loads(run_command([
+            "busctl", "--system", "--json=short", "call", "org.bluez", path,
+            "org.freedesktop.DBus.Properties", "GetAll", "s", "org.bluez.Device1",
+        ], timeout=2).stdout)
+        if not isinstance(raw, dict) or raw.get("type") != "a{sv}": return None
+        data = raw.get("data")
+        if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict): return None
+        connected, alias = data[0].get("Connected"), data[0].get("Alias", {})
+        if not isinstance(connected, dict) or connected.get("type") != "b" or not isinstance(connected.get("data"), bool):
+            return None
+        name = alias.get("data", "") if isinstance(alias, dict) else ""
+        return BluetoothDeviceState(connected["data"], name if isinstance(name, str) else "")
+    except (LiveTranslateError, json.JSONDecodeError):
+        # Missing busctl/BlueZ or a transient D-Bus failure preserves the pactl result.
+        return None
+
+
+def parse_monitors(sources: list[dict], sinks: list[dict], default_sink: str,
+                   bluetooth_states: dict[str, BluetoothDeviceState] | None = None) -> list[MonitorSource]:
     if (not isinstance(sources, list) or not isinstance(sinks, list)
             or any(not isinstance(d, dict) or not isinstance(d.get("properties", {}), dict) for d in [*sources, *sinks])):
         raise LiveTranslateError("audio_devices", "pactl returned an invalid device list")
@@ -49,13 +79,17 @@ def parse_monitors(sources: list[dict], sinks: list[dict], default_sink: str) ->
             continue
         # A .monitor suffix alone is not proof that this is an output monitor.
         sink_name = sink.get("name") if sink else None
-        connection = (sink or {}).get("properties", {}).get("api.bluez5.connection")
-        connected = connection != "disconnected" and source.get("state", "").upper() != "UNAVAILABLE"
+        sink_props = (sink or {}).get("properties", {})
+        connection = sink_props.get("api.bluez5.connection")
+        device = (bluetooth_states or {}).get(sink_props.get("api.bluez5.path"))
+        connected = (device.connected if device else connection != "disconnected")
+        connected = connected and source.get("state", "").upper() != "UNAVAILABLE"
         active = (sink or {}).get("active_port")
         ports = (sink or {}).get("ports", [])
         if any(p.get("name") == active and p.get("availability") in {"not available", "unavailable", "no"} for p in ports):
             connected = False
-        result.append(MonitorSource(name, source.get("description", ""), sink_name,
+        description = f"Monitor of {device.alias}" if device and device.alias else source.get("description", "")
+        result.append(MonitorSource(name, description, sink_name,
                                     source.get("state", "UNKNOWN"), sink_name == default_sink, connected))
     return result
 
@@ -89,7 +123,11 @@ class LinuxAudioCapture:
             default = run_command([self.config.pactl, "get-default-sink"], timeout=8).stdout.strip()
             sources = json.loads(run_command([self.config.pactl, "--format=json", "list", "sources"], timeout=8).stdout)
             sinks = json.loads(run_command([self.config.pactl, "--format=json", "list", "sinks"], timeout=8).stdout)
-            return parse_monitors(sources, sinks, default)
+            # Validate pactl structures before inspecting device properties.
+            monitors = parse_monitors(sources, sinks, default)
+            paths = {path for s in sinks if isinstance(path := s.get("properties", {}).get("api.bluez5.path"), str)}
+            states = {path: state for path in paths if path and (state := bluetooth_device_state(path)) is not None}
+            return parse_monitors(sources, sinks, default, states) if states else monitors
         except json.JSONDecodeError as exc:
             raise LiveTranslateError("audio_devices", f"Invalid pactl JSON: {exc}") from exc
 

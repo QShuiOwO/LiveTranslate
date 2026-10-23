@@ -86,3 +86,19 @@ def test_missing_live_extras_fail_before_creating_session(tmp_path, monkeypatch)
     with pytest.raises(LiveTranslateError, match="Install live extras"):
         run_live(Config(), headless=True, output_dir=session)
     assert not session.exists()
+
+
+def test_auto_source_detects_changed_system_output(monkeypatch):
+    old = MonitorSource("old.monitor", "Old", "old", "RUNNING", False, True)
+    new = MonitorSource("new.monitor", "New", "new", "RUNNING", True, True)
+    monkeypatch.setattr("livetranslate.audio.continuous.LinuxAudioCapture.enumerate_monitors", lambda self: [old, new])
+    with pytest.raises(LiveTranslateError, match="System output changed") as error:
+        LinuxContinuousCapture(AudioConfig())._check_monitor(old)
+    assert error.value.code == "audio_default_changed"
+
+
+def test_explicit_monitor_stays_selected_when_system_default_changes(monkeypatch):
+    old = MonitorSource("old.monitor", "Old", "old", "RUNNING", False, True)
+    new = MonitorSource("new.monitor", "New", "new", "RUNNING", True, True)
+    monkeypatch.setattr("livetranslate.audio.continuous.LinuxAudioCapture.enumerate_monitors", lambda self: [old, new])
+    LinuxContinuousCapture(AudioConfig(source=old.name))._check_monitor(old)

@@ -1,9 +1,11 @@
 from dataclasses import replace
+import json
 import wave
 import pytest
 
 from conftest import write_wav
-from livetranslate.audio.linux import LinuxAudioCapture, MonitorSource, parse_monitors, select_monitor
+from livetranslate.audio.linux import (BluetoothDeviceState, LinuxAudioCapture, MonitorSource,
+                                      bluetooth_device_state, parse_monitors, select_monitor)
 from livetranslate.audio.wav import inspect_wav
 from livetranslate.config import AudioConfig
 from livetranslate.errors import LiveTranslateError
@@ -106,3 +108,63 @@ def test_pactl_json_failure(monkeypatch):
     with pytest.raises(LiveTranslateError) as error:
         LinuxAudioCapture(AudioConfig()).enumerate_monitors()
     assert error.value.code == "audio_devices"
+
+
+BLUETOOTH_PATH = "/org/bluez/hci0/dev_00_11_22_33_44_55"
+
+
+@pytest.mark.parametrize("connected,pipewire", [(True, "disconnected"), (False, "connected")])
+def test_bluez_connection_overrides_stale_pipewire_metadata(connected, pipewire):
+    sinks = [{"name": "bt", "monitor_source": "bt.monitor", "properties": {
+        "api.bluez5.path": BLUETOOTH_PATH, "api.bluez5.connection": pipewire}}]
+    sources = [{"name": "bt.monitor", "state": "SUSPENDED", "description": "(null)"}]
+    rows = parse_monitors(sources, sinks, "bt", {BLUETOOTH_PATH: BluetoothDeviceState(connected, "Test headset")})
+    assert rows[0].connected is connected and rows[0].is_default
+    assert rows[0].description == "Monitor of Test headset"
+    if connected: assert select_monitor(rows).name == "bt.monitor"
+    else:
+        with pytest.raises(LiveTranslateError, match="disconnected"): select_monitor(rows)
+
+
+@pytest.mark.parametrize("connected", [True, False])
+def test_bluez_query_reads_typed_connection_and_unicode_alias(monkeypatch, connected):
+    calls = []
+    payload = {"type": "a{sv}", "data": [{"Connected": {"type": "b", "data": connected},
+                                              "Alias": {"type": "s", "data": "测试耳机"}}]}
+    def query(args, **kwargs):
+        calls.append((args, kwargs))
+        return ProcessResult(0, json.dumps(payload), "", 1)
+    monkeypatch.setattr("livetranslate.audio.linux.run_command", query)
+    assert bluetooth_device_state(BLUETOOTH_PATH) == BluetoothDeviceState(connected, "测试耳机")
+    assert calls[0][0][-3:] == ["GetAll", "s", "org.bluez.Device1"]
+    assert calls[0][1]["timeout"] == 2
+
+
+@pytest.mark.parametrize("raw", ['not json', '[]', '{"type":"a{sv}","data":[]}',
+                                  '{"type":"a{sv}","data":[{"Connected":{"type":"b","data":"true"}}]}'])
+def test_invalid_bluez_response_preserves_pactl_fallback(monkeypatch, raw):
+    monkeypatch.setattr("livetranslate.audio.linux.run_command", lambda *a, **k: ProcessResult(0, raw, "", 1))
+    assert bluetooth_device_state(BLUETOOTH_PATH) is None
+
+
+def test_missing_bluez_or_busctl_is_optional(monkeypatch):
+    def fail(*args, **kwargs): raise LiveTranslateError("executable_missing", "busctl unavailable")
+    monkeypatch.setattr("livetranslate.audio.linux.run_command", fail)
+    assert bluetooth_device_state(BLUETOOTH_PATH) is None
+
+
+def test_bluez_query_rejects_unexpected_object_paths(monkeypatch):
+    monkeypatch.setattr("livetranslate.audio.linux.run_command", lambda *a, **k: pytest.fail("Unexpected D-Bus query"))
+    assert bluetooth_device_state("/org/another/service") is None
+
+
+def test_enumeration_refreshes_bluetooth_before_monitor_selection(monkeypatch):
+    sinks = [{"name": "bt", "monitor_source": "bt.monitor", "properties": {
+        "api.bluez5.path": BLUETOOTH_PATH, "api.bluez5.connection": "disconnected"}}]
+    def query(args, **kwargs):
+        value = "bt" if args[-1] == "get-default-sink" else json.dumps(sinks if args[-1] == "sinks" else [{"name": "bt.monitor"}])
+        return ProcessResult(0, value, "", 1)
+    monkeypatch.setattr("livetranslate.audio.linux.run_command", query)
+    monkeypatch.setattr("livetranslate.audio.linux.bluetooth_device_state", lambda path: BluetoothDeviceState(True, "Headset"))
+    rows = LinuxAudioCapture(AudioConfig()).enumerate_monitors()
+    assert select_monitor(rows).connected
