@@ -10,6 +10,23 @@ M2 的 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验�
 
 ## M2 连续双语字幕
 
+本机已完成环境搭建，启动字幕窗口只需一条命令，可在任意目录执行：
+
+```bash
+livetranslate-start
+```
+
+该命令链接到项目的 `start.sh`，自动使用 `.conda/bin/python`，优先加载 `config/local.toml`（不存在时使用 `config/default.toml`），以 xcb / XWayland 打开窗口，并加载已有的项目内 Qt 库缓存。无需手动激活 Conda 或设置环境变量；Whisper 和 Qwen 服务自动启动，关闭窗口即释放程序拥有的服务。本机配置会跟随系统当前选中的声音输出。
+
+项目目录内也可直接执行 `./start.sh`。支持透传 `live` 的参数，例如 `livetranslate-start --duration 60` 或 `livetranslate-start --help`。相对路径按项目根目录解析；外部路径可传绝对路径。已有 `QT_QPA_PLATFORM` 设置时保留，可用于显式选择其他 Qt 平台。
+
+全新检出完成下方环境搭建后，可在项目根目录添加同名用户命令（`~/.local/bin` 需在 PATH 中；已有同名文件时先检查，不覆盖）：
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/start.sh" "$HOME/.local/bin/livetranslate-start"
+```
+
 已有 M1 环境可直接安装附加依赖并构建同一提交的常驻 Whisper 服务，不更换模型或驱动：
 
 ```bash
