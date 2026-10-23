@@ -1,6 +1,6 @@
 # M0/M1 架构
 
-项目使用 Python src 布局。命令行负责加载 TOML、选择平台适配器和保存结果；核心管线只依赖协议，不导入 Linux 实现。没有 GUI、VAD、持续字幕缓存或自动模型切换。
+本文记录 M0/M1 的同步批次架构，继续兼容。项目使用 Python src 布局。命令行负责加载 TOML、选择平台适配器和保存结果；核心管线只依赖协议，不导入 Linux 实现。M2 的 GUI、VAD 和有界连续处理见 [M2_ARCHITECTURE.md](M2_ARCHITECTURE.md)。
 
 ```text
 CLI + TOML

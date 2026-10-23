@@ -24,6 +24,7 @@ recordings/
 *.log
 config/local.toml
 *.local.toml
+*.local.json
 .env
 .env.*
 __pycache__/

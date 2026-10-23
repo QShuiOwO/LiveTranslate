@@ -53,12 +53,35 @@ class OutputConfig:
 
 
 @dataclass(frozen=True)
+class StreamConfig:
+    whisper_server: str = "build/whisper-vulkan/bin/whisper-server"
+    whisper_port: int = 8082
+    vad_mode: int = 2
+    vad_floor_dbfs: float = -52.0
+    min_speech_ms: int = 240
+    end_silence_ms: int = 560
+    pre_roll_ms: int = 200
+    partial_interval_ms: int = 1000
+    min_partial_ms: int = 1200
+    max_segment_ms: int = 10000
+    frame_queue_size: int = 100
+    final_queue_size: int = 3
+    max_job_age_s: float = 6.0
+    inference_timeout_s: float = 4.0
+    history_limit: int = 80
+    font_size: int = 22
+    opacity: float = 0.96
+    theme: str = "dark"
+
+
+@dataclass(frozen=True)
 class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     asr: ASRConfig = field(default_factory=ASRConfig)
     translation: TranslationConfig = field(default_factory=TranslationConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    stream: StreamConfig = field(default_factory=StreamConfig)
 
 
 def local_base_url(value: str) -> str:
@@ -98,6 +121,23 @@ def validate(config: Config) -> Config:
     if ((s.backend == "vulkan" and not s.device.startswith("Vulkan"))
             or (s.backend == "hip" and not s.device.startswith(("ROCm", "HIP")))):
         raise LiveTranslateError("config", "Server device name must match the requested GPU backend")
+    stream = config.stream
+    limits = {"whisper_port": (1024, 65535), "vad_mode": (0, 3), "vad_floor_dbfs": (-90, -10),
+              "min_speech_ms": (80, 1000), "end_silence_ms": (200, 2000), "pre_roll_ms": (0, 500),
+              "partial_interval_ms": (400, 5000), "min_partial_ms": (500, 5000),
+              "max_segment_ms": (3000, 20000), "frame_queue_size": (10, 250), "final_queue_size": (1, 8),
+              "max_job_age_s": (1, 30), "inference_timeout_s": (1, 15), "history_limit": (5, 200),
+              "font_size": (14, 36), "opacity": (0.4, 1)}
+    for name, (low, high) in limits.items():
+        value = getattr(stream, name)
+        default = getattr(StreamConfig(), name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                or not low <= value <= high or (isinstance(default, int) and not isinstance(value, int))):
+            raise LiveTranslateError("config", f"stream.{name} must be {'an integer ' if isinstance(default, int) else ''}between {low} and {high}")
+    if stream.theme not in {"dark", "light"}:
+        raise LiveTranslateError("config", "Stream theme must be dark/light")
+    if stream.min_partial_ms >= stream.max_segment_ms or stream.min_speech_ms >= stream.end_silence_ms:
+        raise LiveTranslateError("config", "Stream speech/partial duration must precede segment boundaries")
     return replace(config, translation=replace(t, base_url=local_base_url(t.base_url)))
 
 
@@ -113,7 +153,7 @@ def load_config(path: Path | None = None, overrides: dict | None = None) -> Conf
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise LiveTranslateError("config", f"Cannot load {path}: {exc}") from exc
     types = {"audio": AudioConfig, "asr": ASRConfig, "translation": TranslationConfig,
-             "server": ServerConfig, "output": OutputConfig}
+             "server": ServerConfig, "output": OutputConfig, "stream": StreamConfig}
     if set(raw) - set(types):
         raise LiveTranslateError("config", f"Unknown config sections: {sorted(set(raw) - set(types))}")
     merged = {k: dict(v) if isinstance(v, dict) else v for k, v in raw.items()}
@@ -135,11 +175,13 @@ def load_config(path: Path | None = None, overrides: dict | None = None) -> Conf
                 raise LiveTranslateError("config", f"{section}.{key} must be a string")
         # Resolve model/build/output paths; plain executable names use PATH.
         values = {**{f.name: getattr(defaults, f.name) for f in fields(cls)}, **values}
-        for key in ("binary", "model", "directory"):
+        for key in ("binary", "model", "directory", "whisper_server"):
             if key in values and not (section == "translation" and key == "model"):
                 value = values[key]
                 if key != "binary" or "/" in value or "\\" in value or value.startswith("~"):
                     p = Path(value).expanduser()
                     values[key] = str((base / p).resolve() if not p.is_absolute() else p)
         sections[section] = cls(**values)
+    if "whisper_server" not in merged.get("stream", {}):
+        sections["stream"] = replace(sections["stream"], whisper_server=str(Path(sections["asr"].binary).with_name("whisper-server")))
     return validate(Config(**sections))

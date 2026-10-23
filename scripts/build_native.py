@@ -62,8 +62,8 @@ def build(name, source, backend, jobs):
     flags = ["-DCMAKE_BUILD_TYPE=Release", f"-DGGML_VULKAN={'ON' if backend == 'vulkan' else 'OFF'}",
              "-DGGML_CUDA=OFF", "-DGGML_HIP=OFF"]
     if name == "whisper":
-        flags += ["-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF"]
-        targets = ["whisper-cli"]
+        flags += ["-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=ON"]
+        targets = ["whisper-cli", "whisper-server"]
     else:
         flags += ["-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DLLAMA_BUILD_TOOLS=ON"]
         targets = ["llama-server", "llama-bench"]

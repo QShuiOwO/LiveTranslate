@@ -1,10 +1,65 @@
 # LiveTranslate
 
-Ubuntu 24.04 优先的本地英语识别与简体中文翻译原型。采集系统播放音频，以 whisper.cpp Small.en 识别，再通过本地 llama.cpp / Qwen3-4B-Instruct-2507 Q4_K_M 翻译。所有推理在本机完成，当前没有 GUI 或持续流式字幕。Python 3.11+，本次使用独立 Conda Python 3.12 环境。
+Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系统播放音频，以 whisper.cpp Small.en 识别，再通过本地 llama.cpp / Qwen3-4B-Instruct-2507 Q4_K_M 翻译。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
 
 真实验收状态见 [M0/M1 报告](docs/M0_M1_REPORT.md)，实测数据见 [性能报告](docs/benchmarks.md)，硬件与依赖见 [环境审计](docs/environment.md)。不要把 doctor 的设备枚举当成 GPU 推理验证。
 
 本次 M1 已通过真实 HDMI monitor 端到端验收；最终 pytest 69 项通过，包含真实模型测试。默认蓝牙输出已断开，该默认路径保留为失败。逐项结果见 [测试报告](docs/test-results.md)。
+
+M2 已在 HDMI + xcb / XWayland + Vulkan 路径完成超过 30 分钟真实验收，107 项测试通过；原生 Wayland 曝光限制保留在报告中。M1 信息是当时的验收快照。M2 设计、30 分钟运行结果和显示延迟见 [M2 报告](docs/M2_REPORT.md) 与 [M2 性能](docs/M2_BENCHMARKS.md)。
+
+## M2 连续双语字幕
+
+已有 M1 环境可直接安装附加依赖并构建同一提交的常驻 Whisper 服务，不更换模型或驱动：
+
+```bash
+conda activate "$PWD/.conda"
+env -u PYTHONPATH python -m pip install -r config/live-requirements.lock
+env -u PYTHONPATH python -m pip install --no-build-isolation -e .
+python scripts/build_native.py --jobs 8
+python -m livetranslate devices
+python -m livetranslate live --config config/local.toml
+```
+
+也可安装 `python -m pip install -e '.[live]'`；固定版本见 `config/live-requirements.lock`。GUI 使用 PySide6-Essentials，不需要 Qt WebEngine、CUDA、额外 ASR/翻译模型或麦克风权限。Wayland 桌面可直接运行；X11 若 Qt 报缺少 xcb-cursor，安装 Ubuntu 的 `libxcb-cursor0`，无需修改显卡驱动。
+
+启动后自动管理项目自己的本地 Whisper 服务（127.0.0.1:8082）与 Qwen 服务（127.0.0.1:8080）。已存在、健康的本地 Qwen 可复用，模型别名仍会核对；外部服务不会被本程序终止或擅自重启。程序自己启动的服务会在退出时释放。Whisper 服务必须在上述构建后可用；M1 的 whisper-cli 不受影响。
+
+窗口上部显示临时字幕，下部显示已确认英文及中文。英文确认后不再改写；中文只在完成翻译后确认。稳定的临时译文在英文继续增长时保留。字号、深浅主题、字幕历史和置顶提示可在窗口调整；历史最多保留配置指定的条数。Wayland 不支持窗口透明度时禁用该控件，置顶行为由桌面合成器决定。窗口可见期间使用临时桌面 idle inhibitor，退出即释放，不改变系统锁屏设置，也不解除手动锁屏。
+
+本机 GNOME 原生 Wayland 长测出现窗口未最小化但 `exposed=false` 的区间，影响可见字幕测量。需要稳定置顶时使用同一 GUI 的 XWayland / xcb 模式。系统已安装 `libxcb-cursor0` 时只需 `QT_QPA_PLATFORM=xcb python -m livetranslate live --config config/local.toml`。本机为避免全局安装，已将该库解包到项目缓存，可运行：
+
+```bash
+env -u PYTHONPATH QT_QPA_PLATFORM=xcb \
+  LD_LIBRARY_PATH="$PWD/.cache/qt-xcb/root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  python -m livetranslate live --config config/local.toml
+```
+
+缓存重建步骤和实际验证结果见 [M2 报告](docs/M2_REPORT.md)。这里只切换 Qt 显示平台，两类模型仍在同一 RX 9070 XT 上以 Vulkan 推理。
+
+```bash
+# 指定输出的 monitor；不会设置系统默认设备。
+python -m livetranslate live --config config/local.toml --source MONITOR_NAME
+# 定时运行、保存真实窗口截图及测量数据（音频须实际播放）。
+python -m livetranslate live --config config/local.toml --duration 60 \
+  --output-dir artifacts/my-live-session --screenshot artifacts/my-live-session/window.png
+# 无界面模式可用于排查音频与模型；不作为 GUI 延迟验收。
+python -m livetranslate live --config config/local.toml --headless --duration 60
+```
+
+每次运行使用新的目录，保存 events.jsonl、模型日志、资源数据及 summary.json；默认目录自动命名。日志轮转，音频只在内存的有限帧/分段中处理，不连续写录音。状态栏会提示断开、恢复或旧任务丢弃。停止按钮、关闭窗口和 Ctrl+C 都会结束采集、排空有限队列并释放拥有的子进程。
+
+配置 `[stream]` 控制 VAD、停顿、临时识别间隔、最长分段、队列、超时和外观，见 [架构说明](docs/M2_ARCHITECTURE.md)。不含 `[stream]` 的旧 M1 配置继续可用，常驻 ASR 可执行文件默认从 whisper-cli 同目录推导。字幕延迟从 VAD 语音帧进入应用算到可见文字控件实际完成绘制；截图重绘和隐藏窗口不计入，详细测量边界见性能文档。
+
+真实 HDMI 自动验收会播放所给的英语文件：
+
+```bash
+python scripts/validate_stream.py --config config/local.toml --duration 35 \
+  --speech artifacts/jfk.wav --output-dir artifacts/live-short
+# 30 分钟公开人声测试素材准备见 M2 报告；文件及元数据均放在 artifacts。
+python scripts/validate_stream.py --config config/local.toml --duration 1840 --require-soak \
+  --speech artifacts/m2-fixtures/english-30min.wav --output-dir artifacts/live-soak
+```
 
 ## 从全新 Ubuntu 24.04 搭建
 
@@ -14,7 +69,7 @@ Ubuntu 24.04 优先的本地英语识别与简体中文翻译原型。采集系�
 sudo apt update
 sudo apt install -y build-essential cmake git pkg-config ffmpeg \
   libvulkan-dev vulkan-tools glslc libshaderc-dev libcurl4-openssl-dev \
-  pipewire pipewire-pulse wireplumber pulseaudio-utils
+  pipewire pipewire-pulse wireplumber pulseaudio-utils libxcb-cursor0 fonts-noto-cjk
 ```
 
 已有桌面 PipeWire 会话应继续使用。需要 Vulkan 能识别真实 AMD GPU；不要为了本项目替换已工作的驱动。系统没有 Conda 时先按 [Miniforge 官方安装说明](https://github.com/conda-forge/miniforge#install) 安装用户级 Miniforge，并核对官方校验和。
@@ -24,6 +79,7 @@ sudo apt install -y build-essential cmake git pkg-config ffmpeg \
 CONDA_PKGS_DIRS="$PWD/.cache/conda-pkgs" conda create -p "$PWD/.conda" -c conda-forge python=3.12 pip pytest -y
 conda activate "$PWD/.conda"
 env -u PYTHONPATH python -m pip install --no-build-isolation -e .
+env -u PYTHONPATH python -m pip install -r config/live-requirements.lock
 
 # 先审计；权重尚未下载时模型检查失败是预期结果。
 python scripts/doctor.py --output artifacts/doctor.json
@@ -80,7 +136,7 @@ python scripts/capture_test.py --duration 15 --output test.wav --source MONITOR_
 python -m livetranslate demo --duration 15 --source MONITOR_NAME
 ```
 
-本次机器默认蓝牙输出已断开，真实测试通过显式选择已连接 HDMI 的 monitor 完成，没有修改系统默认设备。当前设备名应重新枚举，不能照抄其他机器的音频源。
+M1 验收时默认蓝牙输出已断开，真实测试通过显式选择已连接 HDMI 的 monitor 完成。M2 继续使用显式 HDMI 源，开发过程没有设置系统默认设备。当前设备名应重新枚举，不能照抄其他机器的音频源。
 
 本机已生成被 Git 忽略的 `config/local.toml`，选择本次验证的 HDMI 源，可直接用 `python -m livetranslate demo --config config/local.toml --duration 15`。全新检出时需自行选择可用源。
 
@@ -128,4 +184,4 @@ Vulkan、PulseAudio socket 或 `/dev/dri` 在隔离执行沙箱内不可见时�
 
 ## 交付范围
 
-接口与边界见 [架构文档](docs/architecture.md)。权重、临时录音、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流不绑定 Linux。当前只覆盖 M0/M1，不包含 M2。
+接口与边界见 [M1 架构文档](docs/architecture.md) 和 [M2 架构文档](docs/M2_ARCHITECTURE.md)。权重、音频样本、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流和字幕状态机不绑定 Linux；没有麦克风输入、HIP 适配或模型替换。

@@ -26,15 +26,19 @@ def capture_backend(config):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Local English audio to Simplified Chinese translation (M1)")
+    parser = argparse.ArgumentParser(description="Local English audio to Simplified Chinese translation (M1/M2)")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ["demo", "capture", "transcribe", "translate", "devices", "serve"]:
+    for name in ["demo", "capture", "transcribe", "translate", "devices", "serve", "live"]:
         p = sub.add_parser(name)
         default = Path("config/default.toml")
         p.add_argument("--config", type=Path, default=default if default.exists() else None)
-        if name in {"demo", "capture"}:
+        if name in {"demo", "capture", "live"}:
             p.add_argument("--duration", type=float)
             p.add_argument("--source")
+        if name == "live":
+            p.add_argument("--headless", action="store_true", help="console mode; does not measure GUI display latency")
+            p.add_argument("--output-dir", type=Path)
+            p.add_argument("--screenshot", type=Path, help="save the actual subtitle window after the first bilingual final")
         if name in {"demo", "transcribe"}:
             p.add_argument("--input", type=Path, required=name == "transcribe")
             p.add_argument("--asr-model", type=Path)
@@ -73,8 +77,14 @@ def main(argv=None) -> int:
         if hasattr(args, "backend"):
             section = "server" if args.command == "serve" else "asr"
             override[section].update(backend=args.backend, device=args.device)
+        if args.command == "live":
+            override["audio"].pop("duration", None)
         config = load_config(args.config, override)
         output_dir = Path(config.output.directory)
+        if args.command == "live":
+            from .streaming.runner import run_live
+            return run_live(config, source=args.source, duration=args.duration, headless=args.headless,
+                            output_dir=args.output_dir, screenshot=args.screenshot)
         if args.command == "serve":
             from .server import serve
             return serve(config, args.log)

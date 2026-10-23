@@ -1,4 +1,6 @@
-# 完整测试结果
+# M0/M1 完整测试结果
+
+本页保留 M1 的 69 项验收快照。M2 新增测试、107 项完整运行、真实连续字幕和异常恢复结果见 [M2_REPORT.md](M2_REPORT.md)。
 
 最终运行：69 tests，0 failures，0 errors，0 skipped。
 
