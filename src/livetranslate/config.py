@@ -36,6 +36,9 @@ class TranslationConfig:
     max_tokens: int = 256
     seed: int = 42
     prompt_style: str = "subtitle"
+    context_segments: int = 2
+    context_max_chars: int = 800
+    context_max_age_s: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,9 @@ def validate(config: Config) -> Config:
         ("asr.device", w.device, 0, 32), ("asr.threads", w.threads, 1, 256),
         ("asr.server_port", w.server_port, 1024, 65535),
         ("translation.max_tokens", t.max_tokens, 1, 1024), ("server.port", s.port, 1, 65535),
+        ("translation.context_segments", t.context_segments, 0, 4),
+        ("translation.context_max_chars", t.context_max_chars, 128, 2000),
+        ("translation.context_max_age_s", t.context_max_age_s, 1, 120),
         ("server.context_size", s.context_size, 512, 32768), ("server.gpu_layers", s.gpu_layers, 0, 999),
         ("server.threads", s.threads, 1, 256),
     ]:
@@ -121,7 +127,8 @@ def validate(config: Config) -> Config:
         raise LiveTranslateError("config", "Qwen3-ASR currently supports Vulkan or CPU through speech.cpp")
     if t.prompt_style not in {"subtitle", "hy_mt"}:
         raise LiveTranslateError("config", "translation.prompt_style must be subtitle or hy_mt")
-    for value in [w.device, w.threads, w.server_port, t.max_tokens, t.seed, s.port, s.context_size, s.gpu_layers, s.threads]:
+    for value in [w.device, w.threads, w.server_port, t.max_tokens, t.seed, t.context_segments,
+                  t.context_max_chars, s.port, s.context_size, s.gpu_layers, s.threads]:
         if isinstance(value, bool) or not isinstance(value, int):
             raise LiveTranslateError("config", "Token counts, device indices, seeds, ports and thread counts must be integers")
     if s.backend != "cpu" and s.gpu_layers == 0:

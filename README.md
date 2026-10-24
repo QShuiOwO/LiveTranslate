@@ -75,6 +75,8 @@ python -m livetranslate live --config config/local.toml --duration 60 \
 python -m livetranslate live --config config/local.toml --headless --duration 60
 ```
 
+实时翻译默认参考最近最多两段已确认英文（总计最多 800 字符、30 秒音频时间以内），帮助理解口语省略和多义词；上下文仅供参考，输出只翻译当前段。每个任务固定自己的上下文，缓存也按上下文区分；音源切换、采集重连和丢帧后使用新历史。可在已有 `[translation]` 表内设置 `context_segments`、`context_max_chars`、`context_max_age_s`，其中 `context_segments = 0` 关闭此功能。原始英文不做词语替换，详见 [上下文修正与真实回归](docs/TRANSLATION_CONTEXT.md)。
+
 每次运行使用新的目录，保存 events.jsonl、模型日志、资源数据及 summary.json；默认目录自动命名。日志轮转，音频只在内存的有限帧/分段中处理，不连续写录音。状态栏会提示断开、恢复或旧任务丢弃。停止按钮、关闭窗口和 Ctrl+C 都会结束采集、排空有限队列并释放拥有的子进程。
 
 配置 `[stream]` 控制 VAD、停顿、临时识别间隔、最长分段、队列、超时和外观，见 [架构说明](docs/M2_ARCHITECTURE.md)。旧 M1 配置继续可用：`[asr] engine` 缺省为 `whisper`，其常驻服务从 whisper-cli 同目录推导。当前默认配置显式设置 `engine = "qwen3"`、`server_port = 8083`，常驻和文件识别共用 speech 可执行文件。字幕延迟从 VAD 语音帧进入应用算到可见文字控件实际完成绘制；截图重绘和隐藏窗口不计入，详细测量边界见性能文档。

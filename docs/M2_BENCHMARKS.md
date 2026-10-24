@@ -4,6 +4,10 @@
 
 以下长测数据对应升级前的原生引擎；Whisper v1.9.5 与 llama.cpp 新提交的测量见 [NATIVE_UPGRADE.md](NATIVE_UPGRADE.md)，两次运行的样本数量与测试长度分别列出。
 
+## 有限上下文翻译短测（2026-10-24）
+
+启用最多两段/800 字符/30 秒英文上下文，真实 HDMI + Qwen3-ASR + HY-MT2 + xcb：35.48 秒会话、33.34 秒 PCM、4/4 双语绘制，0 错误/丢弃/过期/改写，退出无遗留 worker。请求的上下文段数依次 0、1、2、2。首英文 P50/P95 1121.95/1204.76 ms，首中文 2803.89/3576.99 ms，语音结束至最终双语 836.67/859.80 ms。样本仅 4 条，不能据此声称普遍性能提升或长期稳定。原始数据 `artifacts/translation-context-20261024/live-short/summary.json`，完整口径见 [上下文报告](TRANSLATION_CONTEXT.md)。
+
 ## 当前模型一分钟短测
 
 Qwen3-ASR-1.7B Q8_0 / speech.cpp + Hy-MT2-7B Q4_K_M / llama.cpp，Vulkan0，HDMI 回采，xcb 窗口。60.39 秒会话、58.34 秒 PCM、45 秒实际英文播放；8/8 双语字幕有有效绘制，0 错误/丢弃/过期/改写，无遗留 worker。

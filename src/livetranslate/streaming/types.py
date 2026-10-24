@@ -27,6 +27,8 @@ class SpeechJob:
     queued_ns: int
     final: bool
     reason: str = "partial"
+    epoch: int = 0
+    continuity: int = 0
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class TextJob:
     speech: SpeechJob
     text: str
     queued_ns: int
+    context: tuple[str, ...] = ()
 
     @property
     def uid(self): return self.speech.uid

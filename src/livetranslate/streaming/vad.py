@@ -27,6 +27,7 @@ class Segmenter:
         self.speech_end_ns = 0
         self.previous = None
         self.gaps = 0
+        self.continuity = 0
 
     def is_speech(self, pcm):
         if len(pcm) != FRAME_BYTES:
@@ -46,7 +47,8 @@ class Segmenter:
         end = min(len(self.frames), len(self.frames) - self.silence + 8)
         frames = self.frames[:end]
         return SpeechJob(self.uid, self.revision, b"".join(f.pcm for f in frames), self.onset_ns,
-                         self.speech_end_ns, frames[-1].end_ns, monotonic_ns(), final, reason)
+                         self.speech_end_ns, frames[-1].end_ns, monotonic_ns(), final, reason,
+                         epoch=frames[0].epoch, continuity=self.continuity)
 
     def _reset(self):
         self.frames = []
@@ -60,6 +62,8 @@ class Segmenter:
             if job: jobs.append(job)
             self._reset()
             self.gaps += 1
+            # Advance even during silence, when there is no old utterance to finalize.
+            self.continuity += 1
         self.previous = frame
         speech = self.is_speech(frame.pcm)
         if not self.frames:

@@ -1,5 +1,7 @@
 # M0/M1 完整测试结果
 
+有限上下文翻译更新（2026-10-24）：**218 tests 全部通过**，含 3 项真实模型测试；另完成 7 次真实翻译回归及 35 秒真实 HDMI 窗口测试，4/4 双语绘制，0 错误/积压。证据目录 `artifacts/translation-context-20261024/`，详见 [上下文修正报告](TRANSLATION_CONTEXT.md)。
+
 背景不透明度调整：171 项无需模型测试通过（含 19 项 GUI 测试），3 项真实模型测试本次未重跑。默认浅色、16 号字、40% 背景；实际像素验证文字/边框不淡化，字幕区和历史区的背景 alpha 不叠加。结果：`artifacts/background-opacity/pytest.xml`。
 
 透明双区域 UI 初版：167 tests，0 failures，0 errors，0 skipped（含 3 项真实模型测试、12 项 GUI 测试）。新增透明 alpha/黑字、双区域缩放、框内滚动、历史跟随及临时/完成分区验证；另通过 35 秒真实 HDMI 可见字幕测试，4/4 完成双语绘制。证据目录：`artifacts/ui-transparent/`。

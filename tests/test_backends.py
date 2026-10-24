@@ -24,8 +24,8 @@ def test_gpu_flag_or_enumeration_alone_is_not_inference():
     assert backend_evidence(log, "vulkan")[0] == "unverified"
 
 
-def mock_llama(monkeypatch, *, content="人工智能正在改变世界。", finish="stop"):
-    client = LlamaTranslator(TranslationConfig())
+def mock_llama(monkeypatch, *, content="人工智能正在改变世界。", finish="stop", config=None):
+    client = LlamaTranslator(config or TranslationConfig())
     calls = []
     def request(path, body=None):
         calls.append((path, body))
@@ -45,6 +45,64 @@ def test_translation_request_is_local_bounded_and_deterministic(monkeypatch):
     path, body = calls[-1]
     assert path == "/v1/chat/completions" and body["temperature"] == 0 and body["max_tokens"] == 256
     assert body["seed"] == 42 and not body["stream"]
+    assert body["messages"][-1] == {"role": "user", "content": "Artificial intelligence is changing the world."}
+
+
+@pytest.mark.parametrize("style", ["hy_mt", "subtitle"])
+def test_translation_context_is_reference_and_current_text_is_preserved(monkeypatch, style):
+    client, calls = mock_llama(monkeypatch, config=TranslationConfig(prompt_style=style))
+    context = ("I am trying to make a tool.", "The last attempt did not work.")
+    text = "What if I do like this?"
+    result = client.translate(text, context=context)
+    assert result.success
+    messages = calls[-1][1]["messages"]
+    assert [message["role"] for message in messages] == (["user"] if style == "hy_mt" else ["system", "user"])
+    reference, separator, current = messages[-1]["content"].partition("【待翻译文本】\n")
+    assert separator and current == text
+    assert "【背景信息】\n" + "\n".join(context) in reference
+    assert "只翻译待翻译文本" in reference and "只输出译文" in reference
+    assert result.metrics["context_segments"] == 2
+    assert result.metrics["context_chars"] == len("\n".join(context))
+    assert all(sentence not in json.dumps(result.metrics) for sentence in context)
+
+
+@pytest.mark.parametrize("context", [None, "A previous sentence.", {"text": "A sentence."},
+                                     (123,), ("",), ("  \n",)])
+def test_invalid_translation_context_fails_before_http(monkeypatch, context):
+    client, calls = mock_llama(monkeypatch)
+    result = client.translate("What if I do like this?", context=context)
+    assert not result.success and result.error_code == "translation_context_invalid"
+    assert calls == []
+
+
+@pytest.mark.parametrize("context", [
+    ("First sentence.", "Second sentence.", "Third sentence."),
+    ("a" * 801,),
+    ("a" * 400, "b" * 400),
+])
+def test_oversized_translation_context_fails_before_http(monkeypatch, context):
+    client, calls = mock_llama(monkeypatch)
+    result = client.translate("The current sentence.", context=context)
+    assert not result.success and result.error_code == "translation_context_long"
+    assert calls == []
+
+
+def test_translation_context_limit_includes_separator_and_accepts_lists(monkeypatch):
+    client, calls = mock_llama(monkeypatch)
+    context = ["a" * 400, "b" * 399]
+    result = client.translate("The current sentence.", context=context)
+    assert result.success and calls[-1][0] == "/v1/chat/completions"
+    assert result.metrics["context_chars"] == 800
+
+
+def test_disabling_context_restores_the_original_request(monkeypatch):
+    client, calls = mock_llama(monkeypatch, config=TranslationConfig(prompt_style="hy_mt", context_segments=0))
+    text = "I do like this painting."
+    result = client.translate(text, context=("A prior sentence that must not be sent.",))
+    assert result.success
+    prompt = calls[-1][1]["messages"][0]["content"]
+    assert prompt == "将以下文本翻译为简体中文，注意只需要输出翻译后的结果，不要额外解释：\n\n" + text
+    assert result.metrics["context_segments"] == 0 and result.metrics["context_chars"] == 0
 
 
 @pytest.mark.parametrize("content,finish,code", [("", "stop", "translation_empty"),

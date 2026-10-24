@@ -31,7 +31,25 @@ class LlamaTranslator:
         # Never inherit HTTP(S)_PROXY for private text, and never follow redirects.
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
-    def messages(self, text: str) -> list[dict]:
+    def _validated_context(self, context) -> tuple[str, ...]:
+        if not self.config.context_segments:
+            return ()
+        if (not isinstance(context, (tuple, list))
+                or any(not isinstance(part, str) or not part.strip() for part in context)):
+            raise LiveTranslateError("translation_context_invalid", "Translation context must contain nonempty English text segments")
+        if (len(context) > self.config.context_segments
+                or len("\n".join(context)) > self.config.context_max_chars):
+            raise LiveTranslateError("translation_context_long", "Translation context exceeds the configured segment or character limit")
+        return tuple(context)
+
+    def messages(self, text: str, *, context: tuple[str, ...] = ()) -> list[dict]:
+        context = self._validated_context(context)
+        if context:
+            content = ("【背景信息】\n" + "\n".join(context)
+                       + "\n\n请结合背景信息将以下文本翻译为简体中文，只翻译待翻译文本，只输出译文，不要额外解释。"
+                       + "\n\n【待翻译文本】\n" + text)
+            user = {"role": "user", "content": content}
+            return [user] if self.config.prompt_style == "hy_mt" else [{"role": "system", "content": SYSTEM_PROMPT}, user]
         if self.config.prompt_style == "hy_mt":
             # HY-MT uses a translation instruction in the user turn and no default system prompt.
             return [{"role": "user", "content":
@@ -65,7 +83,7 @@ class LlamaTranslator:
             raise LiveTranslateError("translation_not_ready", f"llama-server not ready: {data}")
         return data
 
-    def translate(self, text: str) -> TranslationResult:
+    def translate(self, text: str, *, context: tuple[str, ...] = ()) -> TranslationResult:
         start = perf_counter()
         result = TranslationResult(model_name=self.config.model)
         sampler = GPUSampler()
@@ -74,6 +92,8 @@ class LlamaTranslator:
                 raise LiveTranslateError("translation_empty_input", "English text is empty")
             if len(text) > 12000:
                 raise LiveTranslateError("translation_input_long", "M1 accepts at most 12000 characters per request")
+            context = self._validated_context(context)
+            result.metrics.update(context_segments=len(context), context_chars=len("\n".join(context)))
             self.health()
             models = self.request("/v1/models")
             model_data = models.get("data", [])
@@ -85,7 +105,7 @@ class LlamaTranslator:
             with sampler:
                 data = self.request("/v1/chat/completions", {
                     "model": self.config.model,
-                    "messages": self.messages(text),
+                    "messages": self.messages(text, context=context),
                     "temperature": 0.0, "top_p": 1.0, "top_k": 1, "seed": self.config.seed,
                     "max_tokens": self.config.max_tokens, "stream": False, "cache_prompt": False,
                 })

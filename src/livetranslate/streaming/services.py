@@ -218,9 +218,9 @@ class ManagedTranslator:
                                     lambda log: verify_server_backend(log, config.server.backend, config.server.device), status)
         self.client = LlamaTranslator(replace(config.translation, timeout=config.stream.inference_timeout_s))
 
-    def translate(self, text):
+    def translate(self, text, *, context=()):
         self.service.ensure()
-        result = self.client.translate(text)
+        result = self.client.translate(text, context=context)
         if not result.success:
             if result.error_code in {"translation_http", "translation_unavailable", "translation_not_ready"}:
                 self.service.invalidate()

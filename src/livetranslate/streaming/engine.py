@@ -7,6 +7,7 @@ from time import monotonic_ns
 
 from ..errors import LiveTranslateError
 from ..results import save_json
+from .context import TranslationContext
 from .metrics import ResourceMonitor, SessionMetrics
 from .queues import BoundedFrames, WorkQueue
 from .state import CaptionBook, EventBus, complete_clause
@@ -115,7 +116,8 @@ class LiveEngine:
                     if job.final:
                         self.vad_finals += 1
                         self.metrics.event("vad_final", uid=job.uid, onset_ns=job.onset_ns, speech_end_ns=job.speech_end_ns,
-                                           audio_end_ns=job.audio_end_ns, reason=job.reason, pcm_bytes=len(job.pcm))
+                                           audio_end_ns=job.audio_end_ns, reason=job.reason, pcm_bytes=len(job.pcm),
+                                           epoch=job.epoch, continuity=job.continuity)
                     self._offer(self.asr_queue, job)
             job = self.segmenter.finish()
             if job: self._offer(self.asr_queue, job)
@@ -156,6 +158,7 @@ class LiveEngine:
 
     def _asr(self):
         cache = OrderedDict()
+        context = TranslationContext(self.config.translation)
         try:
             while (job := self.asr_queue.get()) is not None:
                 if self._expired(job): continue
@@ -176,13 +179,16 @@ class LiveEngine:
                     row = self.book.asr(job, text)
                     if row is None: continue
                     self._publish(row)
+                    prior = context.before(job)
                     translate_text = text if job.final else complete_clause(row["stable"])
                     if translate_text:
                         previous = self.last_partial_translation.get(job.uid)
                         if job.final or (previous != translate_text and (previous is None or len(translate_text.split()) >= len(previous.split())+4)):
-                            self._offer(self.translation_queue, TextJob(job, translate_text, monotonic_ns()))
+                            self._offer(self.translation_queue, TextJob(job, translate_text, monotonic_ns(), prior))
                             self.last_partial_translation[job.uid] = translate_text
                     if job.final:
+                        # Recognition, not translation success, determines which English is confirmed.
+                        context.remember(job, text)
                         self.last_partial_translation.pop(job.uid, None)
                     while len(self.last_partial_translation) > 8:
                         self.last_partial_translation.pop(next(iter(self.last_partial_translation)))
@@ -196,16 +202,26 @@ class LiveEngine:
 
     def _translate(self):
         cache = OrderedDict()
+        boundary = None
         while (job := self.translation_queue.get()) is not None:
             if self._expired(job): continue
             self.metrics.observe("translation_queue_wait_ms", (monotonic_ns() - job.queued_ns) / 1e6)
-            translated = cache.get(job.text)
+            current_boundary = (job.speech.epoch, job.speech.continuity)
+            if current_boundary != boundary:
+                cache.clear()
+                boundary = current_boundary
+            key = (*current_boundary, job.context, job.text)
+            translated = cache.get(key)
+            self.metrics.event("translation_request", uid=job.uid, final=job.final,
+                               epoch=job.speech.epoch, continuity=job.speech.continuity,
+                               context_segments=len(job.context), context_chars=len("\n".join(job.context)),
+                               cache_hit=translated is not None)
             try:
                 if translated is None:
                     start = monotonic_ns()
-                    translated = self._request(lambda: self.translator.translate(job.text), job)
+                    translated = self._request(lambda: self.translator.translate(job.text, context=job.context), job)
                     self.metrics.observe("translation_inference_ms", (monotonic_ns() - start) / 1e6)
-                    self._cache_put(cache, job.text, translated, 128)
+                    self._cache_put(cache, key, translated, 128)
                 else:
                     self.metrics.observe("translation_cache_hit", 1)
                 row = self.book.translation(job, translated)
