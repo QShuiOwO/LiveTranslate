@@ -12,6 +12,8 @@ Ubuntu 24.04 优先的本地多语言识别与简体中文翻译工具。捕获�
 
 当前支持英语、日语、韩语、法语、德语、西班牙语、意大利语、俄语 → 简体中文，默认背景不透明度为 85%。语言切换、真实测试及质量限制见 [语言切换报告](docs/LANGUAGE_SWITCH.md)。
 
+面向接手开发者的设计说明、模块地图和 Windows 11 26H2 移植清单见 [项目交接文档](docs/HANDOFF_WINDOWS_11_26H2.md)。Windows 适配尚未实现，文档中的 Windows 命令为待实机验证的实施示例。
+
 ## M2 连续双语字幕
 
 本机已完成环境搭建，启动字幕窗口只需一条命令，可在任意目录执行：
@@ -248,7 +250,7 @@ mkdir -p artifacts
 cp vendor/whisper.cpp-d1be6fde11ac/samples/jfk.wav artifacts/jfk.wav
 LIVETRANSLATE_REAL=1 env -u PYTHONPATH python -m pytest -q -m real --junitxml=artifacts/pytest-real.xml
 
-# 真正播放官方英语样本，捕获系统 monitor，再经过真实 Small.en 和 Qwen。
+# 真正播放官方英语样本，捕获系统 monitor，再经过当前配置的真实 ASR 和翻译模型。
 # 该命令会向所选设备播放约 11 秒英语；不改变系统默认输出。
 env -u PYTHONPATH python scripts/validate_real.py --source MONITOR_NAME
 env -u PYTHONPATH python scripts/benchmark.py --iterations 3
@@ -261,4 +263,4 @@ Vulkan、PulseAudio socket 或 `/dev/dri` 在隔离执行沙箱内不可见时�
 
 ## 交付范围
 
-接口与边界见 [M1 架构文档](docs/architecture.md) 和 [M2 架构文档](docs/M2_ARCHITECTURE.md)。权重、音频样本、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流和字幕状态机不绑定 Linux；没有麦克风输入或 HIP 适配。当前仍以英语输入、简体中文输出验收；多语言模型的存在不代表已完成多语言字幕逻辑。
+接口与边界见 [M1 架构文档](docs/architecture.md) 和 [M2 架构文档](docs/M2_ARCHITECTURE.md)。权重、音频样本、原生源码/产物、日志、动态 JSON 和本机配置被 `.gitignore` 排除。Windows 采集适配器暂未实现，已有文件的数据流和字幕状态机不绑定 Linux；没有麦克风输入或 HIP 适配。当前已接入八种源语言到简体中文，并完成多语种短测；当前模型组合尚未进行 30 分钟长期验收。
