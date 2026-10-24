@@ -14,10 +14,11 @@ def stable_prefix(previous, current, language="en"):
             if a != b: break
             count += 1
         return new[:count].rstrip()
-    old, new = previous.split(), current.split()
+    old, new = (unicodedata.normalize("NFC", text).split() for text in (previous, current))
+    punctuation = ",.!?;:" if language == "en" else ",.!?;:…¿¡«»“”„\""
     count = 0
     for a, b in zip(old, new):
-        if a.casefold().strip(",.!?;:") != b.casefold().strip(",.!?;:"): break
+        if a.casefold().strip(punctuation) != b.casefold().strip(punctuation): break
         count += 1
     return " ".join(new[:count])
 
@@ -30,20 +31,22 @@ def complete_clause(text, language="en"):
             clause = text[:matches[-1].end()].strip()
             if text_units(clause, language) >= 6: return clause
         return text.strip() if text_units(text, language) >= 16 else ""
-    matches = list(re.finditer(r"[,.!?;:](?:\s|$)", text))
+    pattern = r"[,.!?;:](?:\s|$)" if language == "en" else r"[,.!?;:…][»”“’\"']*(?:\s|$)"
+    matches = list(re.finditer(pattern, text))
+    minimum_clause = 5 if language == "en" else (3 if language == "ko" else 4)
     if matches:
         clause = text[:matches[-1].end()].strip()
-        if len(clause.split()) >= 5: return clause
+        if len(clause.split()) >= minimum_clause: return clause
     words = text.split()
-    while words and words[-1].lower().strip(",.!?;:") in {"a", "an", "the", "and", "or", "but", "of", "to", "for", "with", "in", "on", "at"}:
+    while language == "en" and words and words[-1].lower().strip(",.!?;:") in {"a", "an", "the", "and", "or", "but", "of", "to", "for", "with", "in", "on", "at"}:
         words.pop()
-    return " ".join(words) if len(words) >= 6 else ""
+    return " ".join(words) if len(words) >= (4 if language == "ko" else 6) else ""
 
 
 def is_prefix(prefix, text, language="en"):
     if language == "ja":
         return bool(prefix) and unicodedata.normalize("NFC", text).startswith(unicodedata.normalize("NFC", prefix))
-    return bool(prefix) and len(stable_prefix(prefix, text).split()) == len(prefix.split())
+    return bool(prefix) and len(stable_prefix(prefix, text, language).split()) == len(prefix.split())
 
 
 class CaptionBook:

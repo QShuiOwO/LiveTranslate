@@ -1,6 +1,6 @@
 # LiveTranslate
 
-Ubuntu 24.04 优先的本地英语／日语识别与简体中文翻译工具。捕获系统播放音频，默认通过 speech.cpp / Qwen3-ASR-1.7B Q8_0 识别，再通过本地 llama.cpp / Hy-MT2-7B Q4_K_M 翻译。新版 whisper.cpp / Small.en 保留为可显式选择的回退配置。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
+Ubuntu 24.04 优先的本地多语言识别与简体中文翻译工具。捕获系统播放音频，默认通过 speech.cpp / Qwen3-ASR-1.7B Q8_0 识别，再通过本地 llama.cpp / Hy-MT2-7B Q4_K_M 翻译。新版 whisper.cpp / Small.en 保留为可显式选择的回退配置。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
 
 真实验收状态见 [M0/M1 报告](docs/M0_M1_REPORT.md)，实测数据见 [性能报告](docs/benchmarks.md)，硬件与依赖见 [环境审计](docs/environment.md)。不要把 doctor 的设备枚举当成 GPU 推理验证。
 
@@ -10,7 +10,7 @@ Ubuntu 24.04 优先的本地英语／日语识别与简体中文翻译工具。�
 
 透明双区域界面初版通过 **167 项测试**，并完成 35 秒真实 HDMI 窗口回归（4/4 完整双语绘制）。界面布局与验收说明见 [M2 报告](docs/M2_REPORT.md)。
 
-最新语言切换支持英语／日语 → 简体中文，默认背景不透明度为 85%。246 项测试和约 60 秒真实 HDMI 切换测试通过，详细测量及日语识别质量限制见 [语言切换报告](docs/LANGUAGE_SWITCH.md)。
+当前支持英语、日语、韩语、法语、德语、西班牙语、意大利语、俄语 → 简体中文，默认背景不透明度为 85%。语言切换、真实测试及质量限制见 [语言切换报告](docs/LANGUAGE_SWITCH.md)。
 
 ## M2 连续双语字幕
 
@@ -22,7 +22,7 @@ livetranslate-start
 
 该命令链接到项目的 `start.sh`，自动使用 `.conda/bin/python`，优先加载 `config/local.toml`（不存在时使用 `config/default.toml`），以 xcb / XWayland 打开窗口，并加载已有的项目内 Qt 库缓存。无需手动激活 Conda 或设置环境变量；Qwen3-ASR 和 HY-MT2 服务自动启动，关闭窗口即释放程序拥有的服务。本机配置会跟随系统当前选中的声音输出。
 
-窗口顶部提供 **英语 → 中文** 和 **日语 → 中文**。选择后立即用于后续系统音频，无需重载模型；切换会清空当前字幕、字幕历史及翻译上下文，正在处理的旧语言结果会被丢弃，建议在语音停顿时切换。默认仍为英语，选项在本次运行有效；不会修改系统声音输出。当前 Qwen3-ASR + HY-MT2 支持这两个方向，Whisper Small.en 回退配置只能选英语。
+窗口顶部语言下拉框提供 **英语、日语、韩语、法语、德语、西班牙语、意大利语、俄语 → 中文**。纯字幕模式可右键选择“返回双框与设置”后切换语言。选择后立即用于后续系统音频，无需重载模型；切换会清空当前字幕、字幕历史及翻译上下文，正在处理的旧语言结果会被丢弃，建议在语音停顿时切换。默认仍为英语，选项在本次运行有效；不会修改系统声音输出。当前 Qwen3-ASR + HY-MT2 共接入上述八个方向，Whisper Small.en 回退配置只能选英语。
 
 可直接以日语模式启动：
 
@@ -31,7 +31,7 @@ livetranslate-start --language ja
 # 英语：livetranslate-start --language en
 ```
 
-需持久保存启动语言时，在 `config/local.toml` 已有的 `[asr]` 表中设置 `language = "ja"`（不要重复创建表）。`demo`、`transcribe`、`translate` 也支持 `--language en|ja`。日语适配与真实短测的结果、限制见 [语言切换验收](docs/LANGUAGE_SWITCH.md)。
+需持久保存启动语言时，在 `config/local.toml` 已有的 `[asr]` 表中设置 `language = "ja"`（不要重复创建表）。`demo`、`transcribe`、`translate` 也支持 `--language en|ja|ko|fr|de|es|it|ru`。参数对应英语、日语、韩语、法语、德语、西班牙语、意大利语、俄语；例如 `livetranslate-start --language ko` 直接启动韩语模式。适配与真实短测的结果、限制见 [语言切换验收](docs/LANGUAGE_SWITCH.md)。
 
 项目目录内也可直接执行 `./start.sh`。支持透传 `live` 的参数，例如 `livetranslate-start --duration 60` 或 `livetranslate-start --help`。相对路径按项目根目录解析；外部路径可传绝对路径。已有 `QT_QPA_PLATFORM` 设置时保留，可用于显式选择其他 Qt 平台。
 

@@ -10,12 +10,14 @@ from livetranslate.streaming.types import SpeechJob, TextJob
 
 
 @pytest.fixture
-def window(monkeypatch):
+def window(monkeypatch, request):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
     from livetranslate.streaming.gui import SubtitleWindow
     app = QApplication.instance() or QApplication([])
     cfg = Config(); cfg = replace(cfg, stream=replace(cfg.stream, history_limit=5))
+    if getattr(request, "param", None) == "qwen3":
+        cfg = replace(cfg, asr=replace(cfg.asr, engine="qwen3"))
     e = SimpleNamespace(config=cfg, presentation="", bus=EventBus(), book=CaptionBook(5),
                         metrics=SimpleNamespace(event=lambda *a, **k: None), presentation_details={},
                         finished=threading.Event(), presented=lambda *a: None, request_stop=lambda: None)
@@ -785,3 +787,28 @@ def test_title_double_click_keeps_maximize_and_restore(window):
     assert w.isMaximized()
     QTest.mouseDClick(w.drag_handle, Qt.MouseButton.LeftButton); settle(app)
     assert not w.isMaximized() and not w.surface_gestures.dragging
+
+
+@pytest.mark.parametrize('window', ['qwen3'], indirect=True)
+def test_language_menu_exposes_eight_directions_and_switches_all_six_new_choices(window):
+    w, e, app = window
+    expected = [('en', '英语'), ('ja', '日语'), ('ko', '韩语'), ('fr', '法语'),
+                ('de', '德语'), ('es', '西班牙语'), ('it', '意大利语'), ('ru', '俄语')]
+    assert w.language.count() == len(expected)
+    for index, (code, name) in enumerate(expected):
+        assert w.language.itemData(index) == code
+        assert w.language.itemText(index) == name + ' → 中文'
+        assert w.language.model().item(index).isEnabled()
+    e.source_language = 'en'; e.language_generation = 0
+    def switch(language):
+        e.source_language = language; e.language_generation += 1; e.book.clear()
+        return e.language_generation
+    e.switch_language = switch
+    for index, (code, name) in enumerate(expected[2:], 2):
+        w.language.setCurrentIndex(index); settle(app)
+        assert e.source_language == code and not w.rows and not w.history
+        assert name in w.draft.en.text()
+    w.resize(700, 420); settle(app)
+    assert w.width() == 700
+    assert w.toolbar.rect().contains(w.language.geometry())
+    assert w.language.geometry().right() < w.minimize_button.geometry().left()

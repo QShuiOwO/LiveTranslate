@@ -184,7 +184,7 @@ class LiveEngine:
             translate_text = text if job.final else complete_clause(row["stable"], job.source_language)
             if translate_text:
                 previous = self.last_partial_translation.get(job.uid)
-                growth = 8 if job.source_language == "ja" else 4
+                growth = 8 if job.source_language == "ja" else (2 if job.source_language == "ko" else 4)
                 if job.final or (previous != translate_text and (previous is None or
                         text_units(translate_text, job.source_language) >= text_units(previous, job.source_language) + growth)):
                     self._offer(self.translation_queue, TextJob(job, translate_text, monotonic_ns(), prior))

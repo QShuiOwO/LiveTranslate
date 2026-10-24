@@ -7,7 +7,7 @@ source = ""
 silence_dbfs = -60.0
 
 [asr]
-language = "en" # en: 英语 → 中文；ja: 日语 → 中文（需要多语言 ASR）
+language = "en" # en/ja/ko/fr/de/es/it/ru → 简体中文；非英语需要多语言 ASR
 engine = "qwen3"
 server_port = 8083
 binary = "../build/speech-vulkan-d074e1b9d84f/speech"

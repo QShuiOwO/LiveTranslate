@@ -10,6 +10,7 @@ from .backends.llama import LlamaTranslator
 from .backends.factory import create_asr
 from .config import load_config
 from .errors import LiveTranslateError
+from .languages import LANGUAGES
 from .pipeline import TranslationPipeline
 from .results import save_json
 
@@ -26,7 +27,7 @@ def capture_backend(config):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Local English/Japanese audio to Simplified Chinese translation (M1/M2)")
+    parser = argparse.ArgumentParser(description="Local multilingual audio to Simplified Chinese translation (M1/M2)")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ["demo", "capture", "transcribe", "translate", "devices", "serve", "live"]:
         p = sub.add_parser(name)
@@ -36,7 +37,8 @@ def main(argv=None) -> int:
             p.add_argument("--duration", type=float)
             p.add_argument("--source")
         if name in {"live", "demo", "transcribe", "translate"}:
-            p.add_argument("--language", choices=["en", "ja"], help="source language: en → 简体中文 / ja → 简体中文")
+            p.add_argument("--language", choices=list(LANGUAGES),
+                           help="source language → 简体中文: " + ", ".join(f"{code}={name}" for code, name in LANGUAGES.items()))
         if name == "live":
             p.add_argument("--headless", action="store_true", help="console mode; does not measure GUI display latency")
             p.add_argument("--output-dir", type=Path)

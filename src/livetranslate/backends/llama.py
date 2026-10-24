@@ -8,7 +8,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 from ..config import TranslationConfig, local_base_url
 from ..errors import LiveTranslateError
-from ..languages import validate_language
+from ..languages import LANGUAGES, validate_language
 from ..results import TranslationResult
 from ..telemetry import GPUSampler
 
@@ -45,8 +45,9 @@ class LlamaTranslator:
 
     def messages(self, text: str, *, context: tuple[str, ...] = (), source_language: str = "en") -> list[dict]:
         validate_language(source_language)
-        system = SYSTEM_PROMPT if source_language == "en" else SYSTEM_PROMPT.replace("英文", "日语").replace("英语", "日语")
-        source = "日语" if source_language == "ja" else ""
+        language_name = LANGUAGES[source_language]
+        system = SYSTEM_PROMPT if source_language == "en" else SYSTEM_PROMPT.replace("英文", language_name).replace("英语", language_name)
+        source = "" if source_language == "en" else language_name
         context = self._validated_context(context)
         if context:
             content = ("【背景信息】\n" + "\n".join(context)

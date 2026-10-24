@@ -12,7 +12,7 @@ from livetranslate.backends.llama import LlamaTranslator
 from livetranslate.backends.qwen_asr import QwenASRBackend
 from livetranslate.config import ASRConfig, Config, TranslationConfig, load_config, validate
 from livetranslate.errors import LiveTranslateError
-from livetranslate.languages import speech_text
+from livetranslate.languages import LANGUAGES, speech_text
 from livetranslate.pipeline import TranslationPipeline
 from livetranslate.process import ProcessResult
 from livetranslate.results import ASRResult, TranslationResult
@@ -34,7 +34,7 @@ def job(uid=1, language="en", generation=0, final=True, revision=1):
                      source_language=language, language_generation=generation)
 
 
-@pytest.mark.parametrize("language", ["en", "ja"])
+@pytest.mark.parametrize("language", list(LANGUAGES))
 def test_language_config_and_overrides(tmp_path, language):
     path = tmp_path / "settings.toml"
     path.write_text('[asr]\nengine="qwen3"\nlanguage="en"\n')
@@ -49,10 +49,11 @@ def test_unsupported_language_is_rejected(language):
 
 
 @pytest.mark.parametrize("model", ["ggml-small.en.bin", "ggml-small.en-q5_1.bin"])
-def test_english_only_whisper_cannot_claim_japanese_support(model):
+@pytest.mark.parametrize("language", [code for code in LANGUAGES if code != "en"])
+def test_english_only_whisper_cannot_claim_multilingual_support(model, language):
     with pytest.raises(LiveTranslateError, match="仅支持英语"):
-        validate(replace(Config(), asr=ASRConfig(model=model, language="ja")))
-    assert validate(replace(Config(), asr=ASRConfig(model="ggml-small.bin", language="ja"))).asr.language == "ja"
+        validate(replace(Config(), asr=ASRConfig(model=model, language=language)))
+    assert validate(replace(Config(), asr=ASRConfig(model="ggml-small.bin", language=language))).asr.language == language
 
 
 def test_japanese_prefix_clause_and_revised_suffix():
@@ -240,7 +241,8 @@ def test_japanese_prompt_never_rewrites_source_or_prior_text():
     assert content.endswith(source) and prior in content
 
 
-def test_live_cli_language_override_reaches_engine_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize("language", list(LANGUAGES))
+def test_live_cli_language_override_reaches_engine_config(tmp_path, monkeypatch, language):
     from livetranslate.cli import main
     path = tmp_path / "settings.toml"
     path.write_text('[asr]\nengine="qwen3"\nlanguage="en"\n')
@@ -249,5 +251,87 @@ def test_live_cli_language_override_reaches_engine_config(tmp_path, monkeypatch)
         calls.append(cfg.asr.language)
         return 0
     monkeypatch.setattr("livetranslate.streaming.runner.run_live", live)
-    assert main(["live", "--config", str(path), "--language", "ja"]) == 0
-    assert calls == ["ja"]
+    assert main(["live", "--config", str(path), "--language", language]) == 0
+    assert calls == [language]
+
+
+NEW_LANGUAGE_CASES = [
+    ('ko', '인공지능은 세상을 바꾸고 있습니다.'),
+    ('fr', "L'intelligence artificielle change le monde."),
+    ('de', 'Künstliche Intelligenz verändert die Welt.'),
+    ('es', 'La inteligencia artificial está cambiando el mundo.'),
+    ('it', "L'intelligenza artificiale sta cambiando il mondo."),
+    ('ru', 'Искусственный интеллект меняет мир.'),
+]
+
+
+@pytest.mark.parametrize('language,text', NEW_LANGUAGE_CASES)
+@pytest.mark.parametrize('style', ['hy_mt', 'subtitle'])
+def test_new_languages_use_correct_translation_prompt_and_preserve_source(language, text, style):
+    translator = LlamaTranslator(TranslationConfig(prompt_style=style))
+    for context in ((), (text,)):
+        messages = translator.messages(text, source_language=language, context=context)
+        assert LANGUAGES[language] in str(messages) and '简体中文' in str(messages)
+        assert '日语' not in str(messages) and '英语' not in str(messages)
+        assert messages[-1]['content'].endswith(text)
+        if context: assert text in messages[-1]['content'].split('【待翻译文本】')[0]
+
+
+@pytest.mark.parametrize('language,text', NEW_LANGUAGE_CASES)
+def test_new_asr_languages_pass_through_cli_and_http(audio, tmp_path, monkeypatch, language, text):
+    monkeypatch.setattr('livetranslate.backends.qwen_asr.check_model', lambda c: Path('/model.gguf'))
+    monkeypatch.setattr('livetranslate.backends.qwen_asr.verify_device', lambda c: {'name': 'Vulkan0'})
+    def run(args, **kwargs):
+        assert args[args.index('--language')+1] == language
+        return ProcessResult(0, json.dumps({'text': text, 'stop': 'complete'}),
+                             'Loaded Qwen3-ASR-1.7B on Vulkan0 in 0.4 s', 1)
+    monkeypatch.setattr('livetranslate.backends.qwen_asr.run_command', run)
+    result = QwenASRBackend(config(language).asr, tmp_path).transcribe(audio)
+    assert result.success and result.source_language == language and result.transcript == text
+    backend = PersistentQwen(config(), tmp_path, lambda *a: None)
+    monkeypatch.setattr(backend.service, 'ensure', lambda: None)
+    class Response(io.BytesIO):
+        headers = {'X-Speech-Stop': 'complete'}
+    def opened(request, **kwargs):
+        assert f'name="language"\r\n\r\n{language}\r\n'.encode() in request.data
+        return Response(json.dumps({'text': text}).encode())
+    monkeypatch.setattr(backend.opener, 'open', opened)
+    assert backend.recognize(b'\1\0' * 320, language=language) == text
+    assert backend.fields['language'] == 'en'
+
+
+@pytest.mark.parametrize('language,text', NEW_LANGUAGE_CASES)
+def test_new_languages_form_stable_clauses_and_preserve_matching_translations(language, text):
+    assert stable_prefix(text, text + ' Next', language) == text
+    assert complete_clause(text, language) == text
+    assert is_prefix(text, text + ' Next', language)
+    book = CaptionBook(); j = job(language=language, final=False)
+    book.asr(j, text)
+    book.translation(TextJob(j, text, monotonic_ns()), '人工智能正在改变世界。')
+    assert book.asr(replace(j, revision=2), text + ' Next')['translated']
+
+
+def test_language_specific_word_rules_do_not_apply_english_tail_trimming_to_others():
+    # The same spelling can be a French verb, not an unfinished English article.
+    french = "Ce sont les livres que Paul a"
+    assert complete_clause(french, 'fr') == french
+    assert complete_clause('인공지능은 세상을 바꾸고 있습니다', 'ko')
+    assert complete_clause('인공지능은 세상을', 'ko') == ''
+    assert stable_prefix('Cafe\u0301 français', 'Café français demain', 'fr') == 'Café français'
+    assert is_prefix('Cafe\u0301 français', 'Café français demain', 'fr')
+    assert is_prefix('¿Cómo funciona', 'Cómo funciona este sistema?', 'es')
+    assert complete_clause('Er sagt das sehr deutlich.“', 'de') == 'Er sagt das sehr deutlich.“'
+
+
+@pytest.mark.parametrize('language,text', NEW_LANGUAGE_CASES)
+def test_switch_to_each_new_language_isolates_old_context(engine, language, text):
+    previous = job(); engine.book.asr(previous, 'Earlier English.')
+    context = TranslationContext(engine.config.translation)
+    context.remember(previous, 'Earlier English.')
+    generation = engine.switch_language(language)
+    j = job(2, language, generation)
+    engine._accept_asr(j, text, context)
+    engine.translation_queue.close()
+    translated = engine.translation_queue.get()
+    assert translated.speech.source_language == language and translated.text == text
+    assert translated.context == () and list(engine.book.rows) == [2]
