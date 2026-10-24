@@ -1,16 +1,18 @@
-"""Pointer gestures for the caption-only surface, scoped to one Qt window."""
+"""Window dragging in both subtitle modes without stealing control interactions."""
 from PySide6.QtCore import QEvent, QObject, QRect, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import (QAbstractButton, QAbstractItemView, QAbstractSlider,
+                              QAbstractSpinBox, QApplication, QComboBox, QLineEdit,
+                              QMenu, QSizeGrip, QWidget)
 
 
 class SubtitleGestures(QObject):
     HOLD_MS = 350
     EDGE_PIXELS = 6
 
-    def __init__(self, window, surface, enabled, show_menu):
+    def __init__(self, window, single_mode, show_menu):
         super().__init__(window)
-        self.window, self.surface = window, surface
-        self.enabled, self.show_menu = enabled, show_menu
+        self.window = window
+        self.single_mode, self.show_menu = single_mode, show_menu
         self.pressed = False
         self.dragging = False
         self.manual = False
@@ -34,13 +36,13 @@ class SubtitleGestures(QObject):
         self.origin = self.latest = self.offset = None
         if QWidget.mouseGrabber() is self.window:
             self.window.releaseMouse()
-        self.surface.unsetCursor()
+        self.window.unsetCursor()
 
     def begin_move(self):
-        if not self.pressed or not self.enabled() or not self.window.isVisible(): return
+        if not self.pressed or self.window.stopping or not self.window.isVisible(): return
         self.dragging = True
-        self.offset = self.latest - self.window.pos()
-        self.surface.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.offset = self.origin - self.window.pos()
+        self.window.setCursor(Qt.CursorShape.ClosedHandCursor)
         handle = self.window.windowHandle()
         # XWayland may return success without the compositor moving a window
         # after a held press. X11 permits direct positioning and pointer capture.
@@ -70,6 +72,20 @@ class SubtitleGestures(QObject):
         elif local.y() >= self.window.height() - self.EDGE_PIXELS: edges |= Qt.Edge.BottomEdge
         return edges
 
+    def _interactive(self, widget):
+        while widget is not None and widget is not self.window:
+            if isinstance(widget, (QAbstractButton, QAbstractSlider, QAbstractSpinBox,
+                                   QComboBox, QLineEdit, QAbstractItemView, QMenu, QSizeGrip)):
+                return True
+            widget = widget.parentWidget()
+        return False
+
+    def _control_at(self, watched, position):
+        # An ignored mouse event can bubble from a control to its parent. Check
+        # both the receiver and the actual hit target, including disabled controls.
+        target = self.window.childAt(self.window.mapFromGlobal(position))
+        return self._interactive(watched) or self._interactive(target)
+
     def eventFilter(self, watched, event):
         kind = event.type()
         if watched is self.window and kind in (QEvent.Type.WindowDeactivate, QEvent.Type.Hide):
@@ -78,10 +94,11 @@ class SubtitleGestures(QObject):
         if kind not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove,
                         QEvent.Type.MouseButtonRelease, QEvent.Type.ContextMenu, QEvent.Type.Wheel):
             return False
-        if not self.enabled() or not isinstance(watched, QWidget): return False
-        if not (watched is self.window or watched is self.surface or self.surface.isAncestorOf(watched)):
+        if self.window.stopping or not isinstance(watched, QWidget): return False
+        if watched.window() is not self.window:
             return False
         if kind == QEvent.Type.ContextMenu:
+            if not self.single_mode() or self._control_at(watched, event.globalPos()): return False
             self.cancel()
             self.show_menu(event.globalPos())
             return True
@@ -91,6 +108,7 @@ class SubtitleGestures(QObject):
         if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             self.cancel()
             position = event.globalPosition().toPoint()
+            if self._control_at(watched, position): return False
             handle = self.window.windowHandle()
             edges = self._edges(position)
             if edges and self.platform == "xcb":
@@ -100,7 +118,10 @@ class SubtitleGestures(QObject):
                 self.resize_geometry = self.window.geometry()
                 self.window.grabMouse()
                 return True
-            if edges and handle and handle.startSystemResize(edges): return True
+            if edges:
+                # Window edges are exclusively for resizing, even if the
+                # compositor cannot handle a resize request on this platform.
+                return bool(handle and handle.startSystemResize(edges))
             self.origin = self.latest = position
             self.pressed = True
             self.hold.start()
@@ -112,10 +133,12 @@ class SubtitleGestures(QObject):
             self.latest = event.globalPosition().toPoint()
             if self.resize_edges:
                 self.resize(self.latest)
-            elif self.dragging and self.manual:
-                self.window.move(self.latest - self.offset)
-            elif not self.dragging and (self.latest - self.origin).manhattanLength() > QApplication.startDragDistance():
-                self.hold.stop()  # A quick swipe is not a stationary long press.
+            else:
+                if not self.dragging and (self.latest - self.origin).manhattanLength() >= QApplication.startDragDistance():
+                    self.hold.stop()
+                    self.begin_move()
+                if self.dragging and self.manual:
+                    self.window.move(self.latest - self.offset)
             return True
         if kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
             pressed = self.pressed

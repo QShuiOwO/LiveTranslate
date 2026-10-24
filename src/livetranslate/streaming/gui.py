@@ -65,30 +65,12 @@ class PaintedLabel(QLabel):
 
 
 class WindowHandle(QLabel):
-    """Move a frameless window with the compositor; keep a fallback for X11."""
+    """Title double-click behavior; dragging is handled by SubtitleGestures."""
     def __init__(self):
         super().__init__("LiveTranslate")
         self.setObjectName("brand")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip("拖动移动窗口；双击放大或还原")
-        self.offset = None
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            handle = self.window().windowHandle()
-            if not handle or not handle.startSystemMove():
-                self.offset = event.globalPosition().toPoint() - self.window().pos()
-            event.accept()
-        else: super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self.offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.window().move(event.globalPosition().toPoint() - self.offset)
-        else: super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self.offset = None
-        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -294,7 +276,7 @@ class SubtitleWindow(QMainWindow):
         header.addWidget(self.drag_handle); header.addWidget(self.status_label, 1)
         self.single_mode = QCheckBox("单框滚动")
         self.single_mode.setAccessibleName("单字幕框滚动模式")
-        self.single_mode.setToolTip("纯字幕框；长按拖动，右键或 Esc 返回设置")
+        self.single_mode.setToolTip("纯字幕框；按住拖动，右键或 Esc 返回设置")
         header.addWidget(self.single_mode)
         self.language = QComboBox()
         self.language.setAccessibleName("识别与翻译语言")
@@ -388,8 +370,7 @@ class SubtitleWindow(QMainWindow):
         self.restore_shortcut.activated.connect(lambda: self.single_mode.setChecked(False))
         self.restore_shortcut.setEnabled(False)
         from .gestures import SubtitleGestures
-        self.surface_gestures = SubtitleGestures(self, self.timeline, self.single_mode.isChecked,
-                                                 self._subtitle_context_menu)
+        self.surface_gestures = SubtitleGestures(self, self.single_mode.isChecked, self._subtitle_context_menu)
         self.single_mode.toggled.connect(self._subtitle_mode)
         self.single_mode.setChecked(engine.config.stream.subtitle_mode == "single")
         self.engine.presentation_details["subtitle_mode"] = engine.config.stream.subtitle_mode

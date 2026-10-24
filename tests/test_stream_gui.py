@@ -604,7 +604,7 @@ def test_long_press_on_new_subtitle_text_moves_window_and_release_stops(window, 
     assert w.pos() == before + delta
 
 
-def test_short_click_and_early_swipe_do_not_trigger_window_drag(window, monkeypatch):
+def test_short_click_stays_put_and_pressed_motion_starts_drag_without_waiting(window, monkeypatch):
     from PySide6.QtCore import QEvent, QPoint, Qt
     from PySide6.QtTest import QTest
     w, e, app = window
@@ -621,9 +621,9 @@ def test_short_click_and_early_swipe_do_not_trigger_window_drag(window, monkeypa
     assert not calls and w.pos() == before
     send_pointer(surface, QEvent.Type.MouseButtonPress, position, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
     send_pointer(surface, QEvent.Type.MouseMove, position + QPoint(40, 0), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
-    QTest.qWait(35)
-    assert not calls and w.pos() == before
+    assert calls == [True] and gesture.dragging and not gesture.hold.isActive()
     send_pointer(surface, QEvent.Type.MouseButtonRelease, position, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    assert not gesture.dragging
 
 
 def test_native_move_and_mode_change_cancel_pending_hold(window, monkeypatch):
@@ -685,3 +685,103 @@ def test_x11_long_press_and_border_resize_use_real_window_geometry(window, monke
     assert w.width() == 240 and w.height() == 100
     send_pointer(w, QEvent.Type.MouseButtonRelease, edge, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
     assert not g.resize_edges and not g.pressed
+
+
+@pytest.mark.parametrize('target', ['brand', 'status', 'toolbar', 'caption_text', 'caption_badge',
+                                  'caption_blank', 'history_text', 'footer', 'container_gap'])
+def test_dual_mode_drag_covers_noninteractive_regions(window, monkeypatch, target):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    w, e, app = window
+    timeline_sentence(window, 1)
+    g = w.surface_gestures; g.platform = 'xcb'
+    monkeypatch.setattr(type(w), 'grabMouse', lambda self: None)
+    widget = {'brand': w.drag_handle, 'status': w.status_label, 'toolbar': w.toolbar,
+              'caption_text': w.final.en, 'caption_badge': w.final.badge,
+              'caption_blank': w.draft.scroll.viewport(), 'footer': w.resource_label,
+              'history_text': w.history[1].en, 'container_gap': w.subtitle_container}[target]
+    if target == 'history_text':
+        w.show_history.setChecked(True); settle(app)
+    if target == 'container_gap':
+        local = QPoint(w.subtitle_container.width() // 2, w.draft.geometry().bottom() + 6)
+    elif target == 'toolbar':
+        local = QPoint(w.toolbar.width() // 2, 32)  # spacing between the two toolbar rows
+    else:
+        local = widget.rect().center()
+    point = widget.mapToGlobal(local)
+    assert widget.isVisible() and not g._control_at(widget, point)
+    before = w.pos()
+    send_pointer(widget, QEvent.Type.MouseButtonPress, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    assert g.pressed
+    send_pointer(widget, QEvent.Type.MouseMove, point + QPoint(24, 18), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert g.dragging and w.pos() == before + QPoint(24, 18)
+    send_pointer(w, QEvent.Type.MouseButtonRelease, point + QPoint(24, 18), Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    assert not g.pressed and not g.dragging
+
+
+@pytest.mark.parametrize('target', ['stop', 'minimize', 'close', 'single_mode', 'history', 'on_top',
+                                  'opacity', 'font', 'font_editor', 'theme', 'language', 'grip', 'scrollbar'])
+def test_controls_and_their_children_never_start_window_drag(window, target):
+    from PySide6.QtCore import QEvent, Qt
+    w, e, app = window
+    widget = {'stop': w.stop_button, 'minimize': w.minimize_button, 'close': w.close_button,
+              'single_mode': w.single_mode, 'history': w.show_history, 'on_top': w.on_top,
+              'opacity': w.opacity, 'font': w.font_size, 'font_editor': w.font_size.lineEdit(),
+              'theme': w.theme, 'language': w.language, 'grip': w.size_grip,
+              'scrollbar': w.draft.scroll.verticalScrollBar()}[target]
+    if target == 'scrollbar':
+        job = SpeechJob(1, 1, b'', 1, 2, 3, monotonic_ns(), False)
+        w.caption(e.book.asr(job, 'Long spoken sentence. ' * 200)); settle(app)
+    assert widget.isVisible()
+    point = widget.mapToGlobal(widget.rect().center())
+    assert w.surface_gestures._control_at(widget, point)
+    # Inspect the filter directly so tests do not activate Close/Stop/Minimize.
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    event = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(widget.rect().center()), QPointF(point),
+                        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    assert not w.surface_gestures.eventFilter(widget, event)
+    # The same event bubbling to the parent must remain a control interaction.
+    assert not w.surface_gestures.eventFilter(widget.parentWidget(), event)
+    assert not w.surface_gestures.pressed and not w.surface_gestures.hold.isActive()
+
+
+def test_real_control_clicks_and_text_editor_still_work(window):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    w, e, app = window
+    before = w.pos()
+    QTest.mouseClick(w.show_history, Qt.MouseButton.LeftButton); settle(app)
+    assert w.show_history.isChecked() and w.scroll.isVisible()
+    editor = w.font_size.lineEdit()
+    QTest.mouseClick(editor, Qt.MouseButton.LeftButton)
+    editor.selectAll(); QTest.keyClicks(editor, '22'); QTest.keyClick(editor, Qt.Key.Key_Return)
+    assert w.font_size.value() == 22
+    old = w.opacity.value()
+    QTest.mouseClick(w.opacity, Qt.MouseButton.LeftButton)
+    assert w.opacity.value() != old
+    assert w.pos() == before and not w.surface_gestures.pressed
+
+
+def test_window_edges_resize_in_dual_mode_and_never_start_move(window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    w, e, app = window
+    g = w.surface_gestures; g.platform = 'xcb'
+    monkeypatch.setattr(type(w), 'grabMouse', lambda self: None)
+    before = w.size(); position = w.pos()
+    edge = w.mapToGlobal(QPoint(w.width()-2, w.height() // 2))
+    send_pointer(w, QEvent.Type.MouseButtonPress, edge, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    assert g.resize_edges == Qt.Edge.RightEdge and not g.hold.isActive()
+    send_pointer(w, QEvent.Type.MouseMove, edge + QPoint(40, 0), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert w.width() == before.width() + 40 and w.height() == before.height()
+    assert w.pos() == position and not g.dragging
+    send_pointer(w, QEvent.Type.MouseButtonRelease, edge, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+
+
+def test_title_double_click_keeps_maximize_and_restore(window):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    w, e, app = window
+    QTest.mouseDClick(w.drag_handle, Qt.MouseButton.LeftButton); settle(app)
+    assert w.isMaximized()
+    QTest.mouseDClick(w.drag_handle, Qt.MouseButton.LeftButton); settle(app)
+    assert not w.isMaximized() and not w.surface_gestures.dragging

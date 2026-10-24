@@ -41,7 +41,7 @@ CaptionBook 对每段使用单调 ID 与 revision。临时结果可更新，原�
 
 纯字幕模式隐藏整个工具栏、状态区、缩放手柄、每段 badge/错误 notice 及无音频占位内容，窗口外边距为零，只留源文/译文和一个边框。诊断仍写入原日志并更新隐藏的完整窗口，恢复设置可查看。右键菜单与 Esc 提供退出纯字幕模式的路径，菜单本身只在请求时出现。
 
-`SubtitleGestures` 是由窗口拥有的 QObject 事件过滤器，仅拦截纯字幕表面及其动态子控件。左键静止按住 350 ms 后开始拖动。xcb / XWayland 使用鼠标捕获和窗口坐标移动；其他 Qt 平台优先调用 `startSystemMove`。本机实测原生请求返回成功但未移动，因此不能仅用返回值判定成功。释放、取消、隐藏窗口和停止监听会清理计时器/捕获。快速点击或阈值前的滑动不会触发长按；滚轮保持正常滚动。6 px 边缘在 xcb 上以几何坐标缩放，在其他平台交给 `startSystemResize`，最小纯字幕尺寸 240×100；双框仍为 700×420。Qt 在窗口销毁时移除过滤器与定时器。
+`SubtitleGestures` 是由窗口拥有的 QObject 事件过滤器，覆盖单框与双框的整个窗口及动态字幕控件。左键按下并移动超过 Qt 拖动阈值就开始拖动，无需等待；静止按住 350 ms 的原长按方式也保留。新按下事件会同时检查接收控件和实际命中位置的祖先链，排除按钮、复选框、输入框、滑块、下拉框、滚动条、缩放手柄及弹出菜单，避免控件忽略事件后冒泡到父容器导致误拖。右键纯字幕菜单仍仅在单框模式启用；其他窗口/弹出窗口不在过滤范围内。xcb / XWayland 使用鼠标捕获和窗口坐标移动；其他 Qt 平台优先调用 `startSystemMove`。本机实测原生请求返回成功但未移动，因此不能仅用返回值判定成功。释放、取消、隐藏窗口和停止监听会清理计时器/捕获。短点击不移动窗口；滚轮保持正常滚动。6 px 边缘在 xcb 上以几何坐标缩放，在其他平台交给 `startSystemResize`，最小纯字幕尺寸 240×100；双框仍为 700×420。Qt 在窗口销毁时移除过滤器与定时器。
 
 ## 英语与日语切换
 
@@ -75,7 +75,7 @@ Qt 使用一个 subtitle_container，内部 QVBoxLayout 将实时区和完成区
 
 实时区显示 ASR partial，以及 ASR final 但翻译未完成的结果。仅 zh_final 的完整双语结果进入下框与历史；上一句翻译完成时不清空更新一句的实时内容。错误继续在实时区显示，已完成区保留最后成功的双语结果。开启历史时在下框内部切换到有界列表，不新增第三个字幕区域；rangeChanged 后按显式 follow_history 状态跟到底，用户上滚后停止跟随。
 
-默认 light 主题使用 WA_TranslucentBackground、FramelessWindowHint，背景不透明度 0.4、中英字号均为 16、文字为 #000000。opacity 配置表示背景不透明度（0–1），窗口自身 opacity 始终为 1.0，不调用 setWindowOpacity；mainSurface 单独绘制 rgba 背景，字幕框、滚动区和历史卡不另加填充，避免 85% 叠加成 64%。滑块支持 0–100% 并显示百分比，light/dark 可调，transparent 固定无填充。无系统标题栏时由自有标题支持 startSystemMove（X11 不支持时用位置拖动回退），双击放大/还原，右下角 QSizeGrip 调整窗口大小，最小化与关闭按钮仍进入原有资源释放流程。透明窗口平台要求见 [Qt QWidget 官方文档](https://doc.qt.io/qt-6/qwidget.html#creating-translucent-windows)。此背景 alpha 实现无需整体窗口 opacity 支持，Wayland 也启用滑块；置顶由合成器决定。
+默认 light 主题使用 WA_TranslucentBackground、FramelessWindowHint，背景不透明度 0.85、中英字号均为 16、文字为 #000000。opacity 配置表示背景不透明度（0–1），窗口自身 opacity 始终为 1.0，不调用 setWindowOpacity；mainSurface 单独绘制 rgba 背景，字幕框、滚动区和历史卡不另加填充，避免多层背景叠加使实际不透明度高于设定值。滑块支持 0–100% 并显示百分比，light/dark 可调，transparent 固定无填充。无系统标题栏时由上述统一手势处理器负责窗口移动，双击放大/还原，右下角 QSizeGrip 调整窗口大小，最小化与关闭按钮仍进入原有资源释放流程。透明窗口平台要求见 [Qt QWidget 官方文档](https://doc.qt.io/qt-6/qwidget.html#creating-translucent-windows)。此背景 alpha 实现无需整体窗口 opacity 支持，Wayland 也启用滑块；置顶由合成器决定。
 
 Qt 平台遵循 QT_QPA_PLATFORM；Ubuntu GNOME Wayland 会话也可选择 xcb，通过 XWayland 显示。测试中 xprop 确认 xcb 窗口具有 _NET_WM_STATE_ABOVE，原生 Wayland 的未曝光区间另行记录。显示平台不改变 Vulkan 推理后端，也不更改系统桌面设置。
 
