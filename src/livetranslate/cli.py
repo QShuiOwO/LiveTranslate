@@ -26,7 +26,7 @@ def capture_backend(config):
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Local English audio to Simplified Chinese translation (M1/M2)")
+    parser = argparse.ArgumentParser(description="Local English/Japanese audio to Simplified Chinese translation (M1/M2)")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ["demo", "capture", "transcribe", "translate", "devices", "serve", "live"]:
         p = sub.add_parser(name)
@@ -35,6 +35,8 @@ def main(argv=None) -> int:
         if name in {"demo", "capture", "live"}:
             p.add_argument("--duration", type=float)
             p.add_argument("--source")
+        if name in {"live", "demo", "transcribe", "translate"}:
+            p.add_argument("--language", choices=["en", "ja"], help="source language: en → 简体中文 / ja → 简体中文")
         if name == "live":
             p.add_argument("--headless", action="store_true", help="console mode; does not measure GUI display latency")
             p.add_argument("--output-dir", type=Path)
@@ -69,7 +71,7 @@ def main(argv=None) -> int:
         for option, section, key in [
             ("duration", "audio", "duration"), ("source", "audio", "source"),
             ("asr_model", "asr", "model"), ("asr_binary", "asr", "binary"),
-            ("asr_engine", "asr", "engine"),
+            ("asr_engine", "asr", "engine"), ("language", "asr", "language"),
             ("base_url", "translation", "base_url"), ("translation_model", "translation", "model"),
             ("max_tokens", "translation", "max_tokens"), ("model", "server", "model"),
             ("binary", "server", "binary"), ("port", "server", "port"),
@@ -101,12 +103,12 @@ def main(argv=None) -> int:
             result = create_asr(config.asr, output_dir, config.audio.silence_dbfs).transcribe(args.input)
             json_path = args.output or output_dir / (new_name("asr") + ".json")
         elif args.command == "translate":
-            result = LlamaTranslator(config.translation).translate(args.text)
+            result = LlamaTranslator(config.translation).translate(args.text, source_language=config.asr.language)
             json_path = args.output or output_dir / (new_name("translation") + ".json")
         else:
             pipeline = TranslationPipeline(None if args.input else capture_backend(config),
                                            create_asr(config.asr, output_dir, config.audio.silence_dbfs), LlamaTranslator(config.translation),
-                                           config.audio.silence_dbfs)
+                                           config.audio.silence_dbfs, source_language=config.asr.language)
             audio = args.audio_output or output_dir / (new_name("capture") + ".wav")
             result = pipeline.run(input_file=args.input, duration=config.audio.duration,
                                   audio_output=audio, source=config.audio.source or None)

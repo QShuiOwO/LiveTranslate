@@ -24,7 +24,7 @@ class TranslationContext:
         if job.uid < self.highest_uid:
             return False
         self.highest_uid = job.uid
-        boundary = (job.epoch, job.continuity)
+        boundary = (job.epoch, job.continuity, job.source_language, job.language_generation)
         if boundary != self.boundary:
             self.entries.clear()
             self.boundary = boundary

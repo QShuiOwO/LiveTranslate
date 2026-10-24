@@ -25,13 +25,23 @@ WebRTC VAD mode=2，附加默认 -52 dBFS 能量门限；所有帧均送入 VAD 
 
 ## 增量与稳定性
 
-相邻识别结果计算词级共同前缀。翻译优先稳定的句读完整片段；没有句读时至少 6 个稳定词并去掉末尾功能词，属于启发式完整度，不是语法模型。临时翻译需比前次增加至少 4 个词；最终结果总会请求翻译，仅当前文本、英文上下文和采集连续性都一致时复用真实先前结果。ASR 按音频内容摘要复用完全相同的输入；两类缓存按插入顺序淘汰。
+相邻识别结果计算词级共同前缀。翻译优先稳定的句读完整片段；没有句读时至少 6 个稳定词并去掉末尾功能词，属于启发式完整度，不是语法模型。临时翻译需比前次增加至少 4 个词；最终结果总会请求翻译，仅当前文本、原文上下文、语言代次和采集连续性都一致时复用真实先前结果。ASR 按源语言、切换代次及音频内容摘要复用完全相同的输入；两类缓存按插入顺序淘汰。
 
-ASR 工作线程的 TranslationContext 默认保存最多两段已确认英文，800 字符、30 秒音频时间以内；超限丢弃整段，不使用旧中文。先为 TextJob 取不可变快照，再将当前英文 final 放入历史，避免自身/未来文字混入。SpeechJob 带采集 epoch 与 Segmenter continuity，后者在静音期也会因 epoch/sequence 断点增加。首个新边界任务清空上下文，翻译缓存包含同一边界与上下文 tuple，并跨边界清空。翻译失败不阻止此前已确认英文作为参考。细节、配置和真实模型回归见 [TRANSLATION_CONTEXT.md](TRANSLATION_CONTEXT.md)。
+ASR 工作线程的 TranslationContext 默认保存最多两段已确认原文，800 字符、30 秒音频时间以内；超限丢弃整段，不使用旧中文。先为 TextJob 取不可变快照，再将当前原文 final 放入历史，避免自身/未来文字混入。SpeechJob 带采集 epoch 与 Segmenter continuity，后者在静音期也会因 epoch/sequence 断点增加。首个新边界任务清空上下文，翻译缓存包含同一边界与上下文 tuple，并跨边界清空。翻译失败不阻止此前已确认原文作为参考。细节、配置和真实模型回归见 [TRANSLATION_CONTEXT.md](TRANSLATION_CONTEXT.md)。
 
-CaptionBook 对每段使用单调 ID 与 revision。临时结果可更新，英文 final 一次确认后冻结；中文 final 一次完成后冻结。旧 revision、旧 ID 或已确认行的改写会被拒绝。中文临时译文只有在来源仍是新英文前缀时保留，避免英文每增长一次就清空中文；不再匹配时撤下。UI 按 ID 更新现有行，只有首次 final 插入历史。历史、已确认 ID 水位和事件合并保证不会因迟到消息重复插入已淘汰的行。
+CaptionBook 对每段使用单调 ID 与 revision。临时结果可更新，原文 final 一次确认后冻结；中文 final 一次完成后冻结。旧 revision、旧 ID 或已确认行的改写会被拒绝。中文临时译文只有在来源仍是新原文前缀时保留，避免原文每增长一次就清空中文；不再匹配时撤下。UI 按 ID 更新现有行，只有首次 final 插入历史。历史、已确认 ID 水位和事件合并保证不会因迟到消息重复插入已淘汰的行。
 
 保留的字幕行最多 history_limit+4，Qt 历史控件最多 history_limit（默认 80）。带上下文的翻译缓存 128，ASR 音频摘要缓存 32，只有有限在途 PCM。延迟序列每项最多 10,000 条，资源采样最多 1,200 条；超过时报告保留窗口及 total_n。应用事件日志 16 MiB、2 个备份；每个原生服务日志 8 MiB、2 个备份。
+
+## 英语与日语切换
+
+`[asr] language = "en" | "ja"` 指定启动语言，CLI `--language` 可覆盖。GUI 顶部选择器调用 `LiveEngine.switch_language`，保留已加载的多语言模型；每次 speech.cpp HTTP 请求显式携带该任务的语言。翻译请求同时传入 `source_language`，日语提示词指定日语到简体中文，英文提示词保持此前的上下文修正。Whisper `.en` 权重不支持日语，配置校验报错、GUI 日语选项禁用。
+
+音频帧在进入有界队列时记录源语言和单调 `language_generation`，SpeechJob、字幕行随任务传递。切换立即更新代次并清空字幕；旧队列项与旧在途推理结果均按代次拒绝。VAD 在首个新代次帧丢弃旧段及前导音频，不将切换当作设备丢帧。上下文和两个推理缓存包含语言/代次；即使切回英语也不会复用旧段上下文。慢推理不持有切换锁；接受结果和切换操作用同一个锁同步。GUI 再次拒绝已排入 UI 队列的旧字幕事件，并清空可见历史。
+
+英语继续使用词级稳定前缀。日语按 NFC Unicode 字符计算共同前缀，以 `。！？!?、` 为句读边界，至少 6 个字符；无句读时至少 16 个稳定字符，后续临时翻译需增长至少 8 字符。此规则不等于完整日语语法分析，长句仍可能被 10 秒上限切开；最终结果始终翻译。
+
+字幕显示 `en` 字段和旧报告 `first_en_ms` / `final_english` 保留以兼容已有分析脚本，含义扩展为“源文”。新报告另外提供 `first_source_ms` / `final_source`，caption/paint 事件记录 `source_language` 与 `language_generation`，可分语言统计。性能与质量验证见 [LANGUAGE_SWITCH.md](LANGUAGE_SWITCH.md)。
 
 ## 服务与恢复
 
@@ -55,10 +65,10 @@ Qt 使用一个 subtitle_container，内部 QVBoxLayout 将实时区和完成区
 
 实时区显示 ASR partial，以及 ASR final 但翻译未完成的结果。仅 zh_final 的完整双语结果进入下框与历史；上一句翻译完成时不清空更新一句的实时内容。错误继续在实时区显示，已完成区保留最后成功的双语结果。开启历史时在下框内部切换到有界列表，不新增第三个字幕区域；rangeChanged 后按显式 follow_history 状态跟到底，用户上滚后停止跟随。
 
-默认 light 主题使用 WA_TranslucentBackground、FramelessWindowHint，背景不透明度 0.4、中英字号均为 16、文字为 #000000。opacity 配置表示背景不透明度（0–1），窗口自身 opacity 始终为 1.0，不调用 setWindowOpacity；mainSurface 单独绘制 rgba 背景，字幕框、滚动区和历史卡不另加填充，避免 40% 叠加成 64%。滑块支持 0–100% 并显示百分比，light/dark 可调，transparent 固定无填充。无系统标题栏时由自有标题支持 startSystemMove（X11 不支持时用位置拖动回退），双击放大/还原，右下角 QSizeGrip 调整窗口大小，最小化与关闭按钮仍进入原有资源释放流程。透明窗口平台要求见 [Qt QWidget 官方文档](https://doc.qt.io/qt-6/qwidget.html#creating-translucent-windows)。此背景 alpha 实现无需整体窗口 opacity 支持，Wayland 也启用滑块；置顶由合成器决定。
+默认 light 主题使用 WA_TranslucentBackground、FramelessWindowHint，背景不透明度 0.4、中英字号均为 16、文字为 #000000。opacity 配置表示背景不透明度（0–1），窗口自身 opacity 始终为 1.0，不调用 setWindowOpacity；mainSurface 单独绘制 rgba 背景，字幕框、滚动区和历史卡不另加填充，避免 85% 叠加成 64%。滑块支持 0–100% 并显示百分比，light/dark 可调，transparent 固定无填充。无系统标题栏时由自有标题支持 startSystemMove（X11 不支持时用位置拖动回退），双击放大/还原，右下角 QSizeGrip 调整窗口大小，最小化与关闭按钮仍进入原有资源释放流程。透明窗口平台要求见 [Qt QWidget 官方文档](https://doc.qt.io/qt-6/qwidget.html#creating-translucent-windows)。此背景 alpha 实现无需整体窗口 opacity 支持，Wayland 也启用滑块；置顶由合成器决定。
 
 Qt 平台遵循 QT_QPA_PLATFORM；Ubuntu GNOME Wayland 会话也可选择 xcb，通过 XWayland 显示。测试中 xprop 确认 xcb 窗口具有 _NET_WM_STATE_ABOVE，原生 Wayland 的未曝光区间另行记录。显示平台不改变 Vulkan 推理后端，也不更改系统桌面设置。
 
-音频的 monotonic_ns 来自 FFmpeg PCM pipe 的读入时刻，同一读批次按 20 ms 回推各帧。VAD 第一/最后有声帧分别定义 onset/end。英文/中文首次显示及 final 双语完成使用 QLabel.paintEvent 完成后的时刻；仅窗口可见且 exposed 时记录，截图 grab 的绘制明确排除。最终双语时间取英文 final 和中文 final 两次绘制的较晚值。headless 只报告模型/队列耗时，不伪造 UI 时延。
+音频的 monotonic_ns 来自 FFmpeg PCM pipe 的读入时刻，同一读批次按 20 ms 回推各帧。VAD 第一/最后有声帧分别定义 onset/end。英文/中文首次显示及 final 双语完成使用 QLabel.paintEvent 完成后的时刻；仅窗口可见且 exposed 时记录，截图 grab 的绘制明确排除。最终双语时间取原文 final 和中文 final 两次绘制的较晚值。headless 只报告模型/队列耗时，不伪造 UI 时延。
 
 这些数据覆盖应用接收到 monitor 音频后的管线，不测量最初 Pulse/HDMI 缓冲、VAD 边界误差和物理屏幕扫描延迟；也不能将整段 WAV 处理时间称为流式字幕延迟。CPU 为应用及拥有的子进程时间增量（100%=1 核）；RSS 分应用与进程树，GPU/VRAM 为设备范围。长测报告单独给出 P50/P95、样本量和内存时间窗。

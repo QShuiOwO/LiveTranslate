@@ -5,6 +5,7 @@ import tomllib
 from urllib.parse import urlsplit
 
 from .errors import LiveTranslateError
+from .languages import validate_asr_language
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class ASRConfig:
     threads: int = 8
     timeout: float = 180.0
     server_port: int = 8083
+    language: str = "en"
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,7 @@ class StreamConfig:
     inference_timeout_s: float = 4.0
     history_limit: int = 80
     font_size: int = 16
-    opacity: float = 0.4
+    opacity: float = 0.85
     theme: str = "light"
 
 
@@ -125,6 +127,7 @@ def validate(config: Config) -> Config:
         raise LiveTranslateError("config", "asr.engine must be whisper or qwen3")
     if w.engine == "qwen3" and w.backend not in {"vulkan", "cpu"}:
         raise LiveTranslateError("config", "Qwen3-ASR currently supports Vulkan or CPU through speech.cpp")
+    validate_asr_language(w, w.language)
     if t.prompt_style not in {"subtitle", "hy_mt"}:
         raise LiveTranslateError("config", "translation.prompt_style must be subtitle or hy_mt")
     for value in [w.device, w.threads, w.server_port, t.max_tokens, t.seed, t.context_segments,

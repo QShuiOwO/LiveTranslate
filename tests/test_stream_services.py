@@ -63,7 +63,7 @@ def test_managed_translator_passes_the_frozen_english_context(tmp_path, monkeypa
     translator = ManagedTranslator(Config(), tmp_path, lambda *a: None)
     events = []
     monkeypatch.setattr(translator.service, "ensure", lambda: events.append("ready"))
-    def translate(text, *, context=()):
+    def translate(text, *, context=(), source_language="en"):
         events.append((text, context))
         return TranslationResult(translated_text="要是我这么做会怎样？", success=True)
     monkeypatch.setattr(translator.client, "translate", translate)
@@ -81,7 +81,7 @@ def test_context_requests_preserve_service_error_recovery(tmp_path, monkeypatch,
     invalidated = []
     monkeypatch.setattr(translator.service, "invalidate", lambda: invalidated.append(True))
     received = []
-    def translate(text, *, context=()):
+    def translate(text, *, context=(), source_language="en"):
         received.append(context)
         return TranslationResult(error="request failed", error_code=code)
     monkeypatch.setattr(translator.client, "translate", translate)

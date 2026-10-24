@@ -1,11 +1,12 @@
 from collections import OrderedDict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 from pathlib import Path
 import threading
 from time import monotonic_ns
 
 from ..errors import LiveTranslateError
+from ..languages import text_units, validate_asr_language
 from ..results import save_json
 from .context import TranslationContext
 from .metrics import ResourceMonitor, SessionMetrics
@@ -18,6 +19,9 @@ from .vad import Segmenter
 class LiveEngine:
     def __init__(self, config, directory, source=None, asr=None, translator=None, detector=None):
         self.config = config
+        self.source_language = config.asr.language
+        self.language_generation = 0
+        self.language_lock = threading.RLock()
         self.directory = Path(directory)
         self.metrics = SessionMetrics(directory)
         self.bus = EventBus()
@@ -51,6 +55,25 @@ class LiveEngine:
         self.vad_finals = 0
         self.empty_asr_finals = 0
 
+    def switch_language(self, language):
+        validate_asr_language(self.config.asr, language)
+        with self.language_lock:
+            if self.stop_event.is_set():
+                raise LiveTranslateError("stopping", "正在停止监听，请重新启动后切换语言")
+            if language != self.source_language:
+                self.source_language = language
+                self.language_generation += 1
+                self.book.clear()
+                self.last_partial_translation.clear()
+                self.metrics.event("language_changed", source_language=language, generation=self.language_generation)
+                self.bus.put({"kind": "language", "source_language": language, "generation": self.language_generation})
+            return self.language_generation
+
+    def _current(self, job):
+        speech = getattr(job, "speech", job)
+        return (speech.language_generation == self.language_generation
+                and speech.source_language == self.source_language)
+
     def status(self, code, message):
         self.metrics.event("status", code=code, message=message)
         self.bus.put({"kind": "status", "code": code, "message": message})
@@ -69,7 +92,7 @@ class LiveEngine:
                 if hasattr(adapter, "service"): adapter.service.ensure()
             if self.stop_event.is_set(): return
             self.metrics.event("session_ready", config=asdict(self.config.stream), asr_model=Path(self.config.asr.model).name,
-                               translation_model=self.config.translation.model)
+                               translation_model=self.config.translation.model, source_language=self.source_language)
             # Consumers start before the producer; native model startup is excluded from speech collection.
             for name, target in [("asr-worker", self._asr), ("translation-worker", self._translate),
                                  ("vad-worker", self._segment), ("capture-worker", self._capture)]:
@@ -93,7 +116,9 @@ class LiveEngine:
                     save_json(self.directory / "capture-ready.json", {"frame_ns": frame.start_ns,
                               "source": getattr(self.source, "source_name", None)})
                 before = self.frames.dropped
-                self.frames.put(frame)
+                with self.language_lock:
+                    self.frames.put(replace(frame, source_language=self.source_language,
+                                            language_generation=self.language_generation))
                 if self.frames.dropped != before:
                     self.status("audio_backlog", "音频处理积压，已丢弃旧帧；字幕可能有缺口")
         except Exception as exc:
@@ -112,12 +137,14 @@ class LiveEngine:
     def _segment(self):
         try:
             while (frame := self.frames.get()) is not None:
+                if not self._current(frame): continue
                 for job in self.segmenter.feed(frame):
                     if job.final:
                         self.vad_finals += 1
                         self.metrics.event("vad_final", uid=job.uid, onset_ns=job.onset_ns, speech_end_ns=job.speech_end_ns,
                                            audio_end_ns=job.audio_end_ns, reason=job.reason, pcm_bytes=len(job.pcm),
-                                           epoch=job.epoch, continuity=job.continuity)
+                                           epoch=job.epoch, continuity=job.continuity,
+                                           source_language=job.source_language, language_generation=job.language_generation)
                     self._offer(self.asr_queue, job)
             job = self.segmenter.finish()
             if job: self._offer(self.asr_queue, job)
@@ -136,9 +163,37 @@ class LiveEngine:
         return True
 
     def _publish(self, row):
-        event = {"kind": "caption", **row}
-        self.metrics.event("caption", **row)
-        self.bus.put(event)
+        with self.language_lock:
+            if row["language_generation"] != self.language_generation: return
+            event = {"kind": "caption", **row}
+            self.metrics.event("caption", **row)
+            self.bus.put(event)
+
+    def _accept_asr(self, job, text, context):
+        # Never hold the language lock during inference. A switch invalidates its
+        # result before it can mutate captions, enqueue translations or add context.
+        with self.language_lock:
+            if not self._current(job): return
+            if not text:
+                if job.final: self.empty_asr_finals += 1
+                return
+            row = self.book.asr(job, text)
+            if row is None: return
+            self._publish(row)
+            prior = context.before(job)
+            translate_text = text if job.final else complete_clause(row["stable"], job.source_language)
+            if translate_text:
+                previous = self.last_partial_translation.get(job.uid)
+                growth = 8 if job.source_language == "ja" else 4
+                if job.final or (previous != translate_text and (previous is None or
+                        text_units(translate_text, job.source_language) >= text_units(previous, job.source_language) + growth)):
+                    self._offer(self.translation_queue, TextJob(job, translate_text, monotonic_ns(), prior))
+                    self.last_partial_translation[job.uid] = translate_text
+            if job.final:
+                context.remember(job, text)
+                self.last_partial_translation.pop(job.uid, None)
+            while len(self.last_partial_translation) > 8:
+                self.last_partial_translation.pop(next(iter(self.last_partial_translation)))
 
     @staticmethod
     def _cache_put(cache, key, value, size):
@@ -151,7 +206,8 @@ class LiveEngine:
             try:
                 return function()
             except LiveTranslateError:
-                if not job.final or attempt or (monotonic_ns()-job.queued_ns)/1e9 >= self.config.stream.max_job_age_s:
+                if (not self._current(job) or not job.final or attempt
+                        or (monotonic_ns()-job.queued_ns)/1e9 >= self.config.stream.max_job_age_s):
                     raise
                 self.metrics.observe("final_request_retry", 1)
                 self.status("service_retry", "本地推理暂不可用，正在重试当前语句")
@@ -161,38 +217,21 @@ class LiveEngine:
         context = TranslationContext(self.config.translation)
         try:
             while (job := self.asr_queue.get()) is not None:
-                if self._expired(job): continue
+                if not self._current(job) or self._expired(job): continue
                 self.metrics.observe("asr_queue_wait_ms", (monotonic_ns() - job.queued_ns) / 1e6)
-                key = hashlib.sha256(job.pcm).digest()
+                key = (job.source_language, job.language_generation, hashlib.sha256(job.pcm).digest())
                 text = cache.get(key)
                 try:
                     if text is None:
                         start = monotonic_ns()
-                        text = self._request(lambda: self.asr.recognize(job.pcm), job)
+                        text = self._request(lambda: self.asr.recognize(job.pcm, language=job.source_language), job)
                         self.metrics.observe("asr_inference_ms", (monotonic_ns() - start) / 1e6)
                         if text: self._cache_put(cache, key, text, 32)
                     else:
                         self.metrics.observe("asr_cache_hit", 1)
-                    if not text:
-                        if job.final: self.empty_asr_finals += 1
-                        continue
-                    row = self.book.asr(job, text)
-                    if row is None: continue
-                    self._publish(row)
-                    prior = context.before(job)
-                    translate_text = text if job.final else complete_clause(row["stable"])
-                    if translate_text:
-                        previous = self.last_partial_translation.get(job.uid)
-                        if job.final or (previous != translate_text and (previous is None or len(translate_text.split()) >= len(previous.split())+4)):
-                            self._offer(self.translation_queue, TextJob(job, translate_text, monotonic_ns(), prior))
-                            self.last_partial_translation[job.uid] = translate_text
-                    if job.final:
-                        # Recognition, not translation success, determines which English is confirmed.
-                        context.remember(job, text)
-                        self.last_partial_translation.pop(job.uid, None)
-                    while len(self.last_partial_translation) > 8:
-                        self.last_partial_translation.pop(next(iter(self.last_partial_translation)))
+                    self._accept_asr(job, text, context)
                 except Exception as exc:
+                    if not self._current(job): continue
                     self.error_count += 1
                     self.status("asr_recovering", str(exc))
                     row = self.book.failure(job.uid, "识别暂不可用，正在恢复")
@@ -204,9 +243,10 @@ class LiveEngine:
         cache = OrderedDict()
         boundary = None
         while (job := self.translation_queue.get()) is not None:
-            if self._expired(job): continue
+            if not self._current(job) or self._expired(job): continue
             self.metrics.observe("translation_queue_wait_ms", (monotonic_ns() - job.queued_ns) / 1e6)
-            current_boundary = (job.speech.epoch, job.speech.continuity)
+            current_boundary = (job.speech.epoch, job.speech.continuity, job.speech.source_language,
+                                job.speech.language_generation)
             if current_boundary != boundary:
                 cache.clear()
                 boundary = current_boundary
@@ -214,19 +254,24 @@ class LiveEngine:
             translated = cache.get(key)
             self.metrics.event("translation_request", uid=job.uid, final=job.final,
                                epoch=job.speech.epoch, continuity=job.speech.continuity,
+                               source_language=job.speech.source_language, language_generation=job.speech.language_generation,
                                context_segments=len(job.context), context_chars=len("\n".join(job.context)),
                                cache_hit=translated is not None)
             try:
                 if translated is None:
                     start = monotonic_ns()
-                    translated = self._request(lambda: self.translator.translate(job.text, context=job.context), job)
+                    translated = self._request(lambda: self.translator.translate(job.text, context=job.context,
+                                                                                 source_language=job.speech.source_language), job)
                     self.metrics.observe("translation_inference_ms", (monotonic_ns() - start) / 1e6)
                     self._cache_put(cache, key, translated, 128)
                 else:
                     self.metrics.observe("translation_cache_hit", 1)
-                row = self.book.translation(job, translated)
-                if row: self._publish(row)
+                with self.language_lock:
+                    if not self._current(job): continue
+                    row = self.book.translation(job, translated)
+                    if row: self._publish(row)
             except Exception as exc:
+                if not self._current(job): continue
                 self.error_count += 1
                 self.status("translation_recovering", str(exc))
                 row = self.book.failure(job.uid, "翻译暂不可用，后续语句将自动重试")
@@ -239,6 +284,8 @@ class LiveEngine:
             self.metrics.ui_paints += 1
             self.presentation_details["exposed_paint_events"] = self.metrics.ui_paints
             self.metrics.event("paint", uid=snapshot["uid"], field=field, painted_ns=time_ns,
+                               source_language=snapshot.get("source_language", "en"),
+                               language_generation=snapshot.get("language_generation", 0),
                                onset_ns=snapshot["onset_ns"], speech_end_ns=snapshot["speech_end_ns"], metrics=metrics)
 
     def request_stop(self):
@@ -265,6 +312,7 @@ class LiveEngine:
     def report(self):
         resources = list(self.metrics.resources)
         report = {"session_elapsed_s": (monotonic_ns() - self.metrics.start_ns) / 1e9,
+                  "source_language": self.source_language, "language_switches": self.language_generation,
                   "capture_elapsed_s": (monotonic_ns() - self.first_frame_ns) / 1e9 if self.first_frame_ns else 0,
                   "presentation": self.presentation, "start_error": self.start_error,
                   "gui": self.presentation_details,
@@ -278,6 +326,9 @@ class LiveEngine:
                   "final_mutation_attempts": self.book.final_mutation_attempts,
                   "workers_alive": [t.name for t in self.threads if t.is_alive()],
                   "timestamp_scope": "monotonic_ns: VAD first/last voiced PCM frame ingress -> QLabel paintEvent completion; excludes unmeasured initial Pulse/HDMI buffering and physical compositor/panel latency"}
+        # Preserve historical report readers while exposing language-neutral names.
+        report["final_source"] = report["final_english"]
+        report["speech_to_display"]["first_source_ms"] = report["speech_to_display"].get("first_en_ms", {})
         report["services"] = {name: {"starts": adapter.service.starts, "restarts": adapter.service.restarts,
                                       "external": adapter.service.external, "evidence": adapter.service.evidence}
                               for name, adapter in [("asr", self.asr), ("translation", self.translator)] if hasattr(adapter, "service")}

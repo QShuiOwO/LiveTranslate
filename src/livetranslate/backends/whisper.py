@@ -8,6 +8,7 @@ from uuid import uuid4
 from ..audio.wav import inspect_wav
 from ..config import ASRConfig
 from ..errors import LiveTranslateError
+from ..languages import speech_text, validate_asr_language
 from ..process import run_command
 from ..results import ASRResult
 from ..telemetry import GPUSampler
@@ -43,9 +44,10 @@ class WhisperBackend:
 
     def transcribe(self, audio_file: Path) -> ASRResult:
         start = perf_counter()
-        result = ASRResult(model_name=Path(self.config.model).name)
+        result = ASRResult(source_language=self.config.language, model_name=Path(self.config.model).name)
         sampler = GPUSampler()
         try:
+            validate_asr_language(self.config, self.config.language)
             audio = inspect_wav(Path(audio_file), self.silence_dbfs)
             model = Path(self.config.model)
             if not model.is_file():
@@ -58,7 +60,7 @@ class WhisperBackend:
             with tempfile.TemporaryDirectory(prefix="whisper-", dir=self.output_dir) as tmp:
                 prefix = Path(tmp) / "transcript"
                 args = [self.config.binary, "-m", str(model), "-f", str(Path(audio_file).resolve()),
-                        "-l", "en", "-t", str(self.config.threads), "-oj", "-of", str(prefix),
+                        "-l", self.config.language, "-t", str(self.config.threads), "-oj", "-of", str(prefix),
                         "-tp", "0", "-tpi", "0", "-nt"]
                 args += ["-ng"] if self.config.backend == "cpu" else ["-dev", str(self.config.device)]
                 with sampler:
@@ -79,8 +81,8 @@ class WhisperBackend:
                     result.transcript = " ".join(segment["text"].strip() for segment in data["transcription"]).strip()
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     raise LiveTranslateError("asr_output_invalid", f"Cannot parse whisper-cli JSON: {exc}") from exc
-                if not result.transcript or not re.search(r"[a-zA-Z]", result.transcript) or result.transcript in {"[BLANK_AUDIO]", "[Silence]"}:
-                    raise LiveTranslateError("asr_empty", "Whisper produced no English speech transcript")
+                if not speech_text(result.transcript):
+                    raise LiveTranslateError("asr_empty", "Whisper produced no speech transcript")
                 result.metrics["process_elapsed_ms"] = proc.elapsed_ms
                 result.metrics["audio_duration_ms"] = audio.duration_ms
                 result.success = True

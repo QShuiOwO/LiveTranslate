@@ -214,11 +214,11 @@ def test_engine_fake_data_flow_failure_recovery_and_shutdown(tmp_path):
         def close(self): pass
     class ASR:
         closed = False
-        def recognize(self, pcm): return "The world is changing rapidly."
+        def recognize(self, pcm, *, language="en"): return "The world is changing rapidly."
         def close(self): self.closed = True
     class Translator:
         closed = False
-        def translate(self, text, *, context=()): return "世界正在迅速变化。"
+        def translate(self, text, *, context=(), source_language="en"): return "世界正在迅速变化。"
         def close(self): self.closed = True
     a, t = ASR(), Translator()
     engine = LiveEngine(Config(), tmp_path / "session", Source(), a, t, Detector())

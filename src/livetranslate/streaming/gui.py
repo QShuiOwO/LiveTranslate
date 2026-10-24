@@ -7,6 +7,9 @@ import sys
 import os
 from time import monotonic_ns
 
+from ..errors import LiveTranslateError
+from ..languages import LANGUAGES, validate_asr_language
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QFont, QPainter, QPen, QPalette
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout,
@@ -158,7 +161,7 @@ class CaptionCard(QFrame):
         self.zh.caption(row, row["translated"])
         self.zh.setVisible(bool(row["translated"]))
         self.badge.setText("处理暂不可用" if row.get("error") else ("识别完成 · 双语字幕" if row["zh_final"]
-                           else ("英文已确认 · 翻译中" if row["final"] else "正在识别 · 实时双语")))
+                           else ("原文已确认 · 翻译中" if row["final"] else "正在识别 · 实时双语")))
         self.notice.setText(row.get("error") or "")
         self.notice.setVisible(bool(row.get("error")))
 
@@ -186,6 +189,7 @@ class SubtitleWindow(QMainWindow):
         self.stopping = False
         self.allow_close = False
         self.history_insertions = 0
+        self.language_generation = getattr(engine, "language_generation", 0)
         self.inhibitor = None
         self._visibility = None
         self.stop_deadline_ns = monotonic_ns() + int(duration * 1e9) if duration else None
@@ -214,6 +218,19 @@ class SubtitleWindow(QMainWindow):
         self.close_button.setAccessibleName("关闭字幕窗口")
         self.close_button.clicked.connect(self.close)
         header.addWidget(self.drag_handle); header.addWidget(self.status_label, 1)
+        self.language = QComboBox()
+        self.language.setAccessibleName("识别与翻译语言")
+        self.language.setToolTip("切换后从新音频开始识别，并清空当前字幕和历史")
+        for code, name in LANGUAGES.items():
+            self.language.addItem(f"{name} → 中文", code)
+            try:
+                validate_asr_language(engine.config.asr, code)
+            except LiveTranslateError as exc:
+                item = self.language.model().item(self.language.count() - 1)
+                item.setEnabled(False)
+                item.setToolTip(str(exc))
+        self.language.setCurrentIndex(self.language.findData(engine.config.asr.language))
+        header.addWidget(self.language)
         header.addWidget(self.minimize_button); header.addWidget(self.close_button)
         toolbar_layout.addLayout(header)
         controls = QHBoxLayout(); controls.setSpacing(8)
@@ -249,10 +266,10 @@ class SubtitleWindow(QMainWindow):
         subtitles = QVBoxLayout(self.subtitle_container)
         subtitles.setContentsMargins(0, 0, 0, 0); subtitles.setSpacing(12)
         self.draft = CaptionCard(engine, True)
-        self.draft.en.setText("等待系统音频中的英语语音…")
+        self.draft.en.setText(f"等待系统音频中的{LANGUAGES[engine.config.asr.language]}语音…")
         self.draft.zh.hide()
         self.final = CaptionCard(engine)
-        self.final.en.setText("完成的英文和中文译文将显示在这里")
+        self.final.en.setText("完成的原文和中文译文将显示在这里")
         self.final.zh.hide()
         subtitles.addWidget(self.draft, 1); subtitles.addWidget(self.final, 1)
         layout.addWidget(self.subtitle_container, 1)
@@ -281,10 +298,42 @@ class SubtitleWindow(QMainWindow):
         self.theme.currentIndexChanged.connect(self.appearance)
         self.on_top.toggled.connect(self._top)
         self.show_history.toggled.connect(self._history)
+        self.language.currentIndexChanged.connect(self._language_changed)
         self.appearance()
         self.timer = QTimer(self); self.timer.setInterval(33); self.timer.timeout.connect(self.poll); self.timer.start()
         self._old_sigint = signal.signal(signal.SIGINT, lambda *args: self.request_stop("SIGINT"))
         self._old_sigterm = signal.signal(signal.SIGTERM, lambda *args: self.request_stop("SIGTERM"))
+
+    def _language_changed(self, index):
+        try:
+            self.engine.switch_language(self.language.itemData(index))
+            self._sync_language()
+        except LiveTranslateError as exc:
+            self.language.blockSignals(True)
+            self.language.setCurrentIndex(self.language.findData(self.engine.source_language))
+            self.language.blockSignals(False)
+            self.status_label.setText(str(exc))
+
+    def _sync_language(self):
+        generation = getattr(self.engine, "language_generation", 0)
+        if generation == self.language_generation: return
+        self.language_generation = generation
+        language = self.engine.source_language
+        self.language.blockSignals(True)
+        self.language.setCurrentIndex(self.language.findData(language))
+        self.language.blockSignals(False)
+        self.rows.clear()
+        for card in self.history.values():
+            self.history_layout.removeWidget(card)
+            card.hide(); card.deleteLater()
+        self.history.clear()
+        self.latest_draft = self.latest_final = 0
+        self.follow_history = True
+        self.draft.clear_draft(); self.final.clear_draft()
+        self.draft.en.setText(f"等待系统音频中的{LANGUAGES[language]}语音…")
+        self.final.badge.setText("识别完成 · 双语字幕")
+        self.final.en.setText("完成的原文和中文译文将显示在这里")
+        self.status_label.setText(f"● 已切换为{LANGUAGES[language]} → 中文，正在监听新音频")
 
     def _top(self, enabled):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
@@ -322,7 +371,7 @@ class SubtitleWindow(QMainWindow):
             background, text, border = f"rgba(17, 24, 39, {alpha})", "#f1f5f9", "#94a3b8"
         else:
             background, text, border = f"rgba(238, 242, 246, {alpha})", "#000000", "#596579"
-        # Paint the background once; two translucent layers would turn 40% into 64% inside each card.
+        # Paint the background once so overlapping cards do not compound its opacity.
         self.setStyleSheet(f"""
         QWidget {{ background: transparent; color: {text}; }}
         QWidget#mainSurface {{ background: {background}; border-radius: 16px; }}
@@ -362,6 +411,7 @@ class SubtitleWindow(QMainWindow):
             self.request_stop("duration")
         for event in self.engine.bus.drain():
             if event["kind"] == "caption": self.caption(event)
+            elif event["kind"] == "language": self._sync_language()
             elif event["kind"] == "status":
                 self.status_label.setText(self._status(event["code"], event["message"]))
             elif event["kind"] == "resources":
@@ -383,6 +433,8 @@ class SubtitleWindow(QMainWindow):
         return "正在恢复：" + message
 
     def caption(self, row):
+        self._sync_language()
+        if row.get("language_generation", 0) != self.language_generation: return
         uid = row["uid"]
         previous = self.rows.get(uid)
         if previous is None and row["final"] and uid <= self.latest_final: return
@@ -428,6 +480,7 @@ class SubtitleWindow(QMainWindow):
         self.engine.metrics.event("stop_requested", reason=reason, deadline_ns=self.stop_deadline_ns,
                                   remaining_s=(self.stop_deadline_ns-monotonic_ns())/1e9 if self.stop_deadline_ns else None)
         self.stopping = True; self.stop_button.setEnabled(False)
+        self.language.setEnabled(False)
         self.status_label.setText("正在结束当前字幕并释放音频与模型资源…")
         self.engine.request_stop()
 

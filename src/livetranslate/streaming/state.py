@@ -1,9 +1,19 @@
 from collections import OrderedDict, deque
 import re
 import threading
+import unicodedata
+
+from ..languages import text_units
 
 
-def stable_prefix(previous, current):
+def stable_prefix(previous, current, language="en"):
+    if language == "ja":
+        old, new = (unicodedata.normalize("NFC", text) for text in (previous, current))
+        count = 0
+        for a, b in zip(old, new):
+            if a != b: break
+            count += 1
+        return new[:count].rstrip()
     old, new = previous.split(), current.split()
     count = 0
     for a, b in zip(old, new):
@@ -12,8 +22,14 @@ def stable_prefix(previous, current):
     return " ".join(new[:count])
 
 
-def complete_clause(text):
+def complete_clause(text, language="en"):
     # Only stable, substantial clauses trigger a provisional translation.
+    if language == "ja":
+        matches = list(re.finditer(r"[。！？!?、]", text))
+        if matches:
+            clause = text[:matches[-1].end()].strip()
+            if text_units(clause, language) >= 6: return clause
+        return text.strip() if text_units(text, language) >= 16 else ""
     matches = list(re.finditer(r"[,.!?;:](?:\s|$)", text))
     if matches:
         clause = text[:matches[-1].end()].strip()
@@ -24,7 +40,9 @@ def complete_clause(text):
     return " ".join(words) if len(words) >= 6 else ""
 
 
-def is_prefix(prefix, text):
+def is_prefix(prefix, text, language="en"):
+    if language == "ja":
+        return bool(prefix) and unicodedata.normalize("NFC", text).startswith(unicodedata.normalize("NFC", prefix))
     return bool(prefix) and len(stable_prefix(prefix, text).split()) == len(prefix.split())
 
 
@@ -39,6 +57,10 @@ class CaptionBook:
         self.bilingual_count = 0
         self.highest_final_uid = 0
 
+    def clear(self):
+        with self.lock:
+            self.rows.clear()
+
     def asr(self, job, text):
         with self.lock:
             row = self.rows.get(job.uid)
@@ -49,10 +71,11 @@ class CaptionBook:
             if row and (row["final"] or row["revision"] >= job.revision):
                 self.ignored_stale += 1
                 return None
-            stable = stable_prefix(row["text"], text) if row else ""
+            stable = stable_prefix(row["text"], text, job.source_language) if row else ""
             translated_source = row.get("translated_source", "") if row else ""
-            keep_translation = bool(row and is_prefix(translated_source, text))
+            keep_translation = bool(row and is_prefix(translated_source, text, job.source_language))
             row = {"uid": job.uid, "revision": job.revision, "text": text,
+                   "source_language": job.source_language, "language_generation": job.language_generation,
                    "stable": stable, "translated": row["translated"] if keep_translation else "",
                    "translated_source": translated_source if keep_translation else "",
                    "final": job.final, "zh_final": False, "error": None,
@@ -79,7 +102,7 @@ class CaptionBook:
                 row["translated"], row["zh_final"] = text, True
                 row["translated_source"] = job.text
                 self.bilingual_count += 1
-            elif not row["final"] and is_prefix(job.text, row["text"]):
+            elif not row["final"] and is_prefix(job.text, row["text"], job.speech.source_language):
                 row["translated"] = text
                 row["translated_source"] = job.text
             else:

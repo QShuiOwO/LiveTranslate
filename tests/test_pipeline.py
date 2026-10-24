@@ -23,7 +23,7 @@ class FakeTranslator:
         self.calls = []
         self.success = success
 
-    def translate(self, text):
+    def translate(self, text, *, source_language="en"):
         self.calls.append(text)
         return TranslationResult(translated_text="你好，世界。", elapsed_ms=20, model_name="fake-translator",
                                  success=self.success, error=None if self.success else "service unavailable",

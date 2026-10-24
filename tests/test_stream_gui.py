@@ -119,15 +119,15 @@ def pixel_at(image, point):
     return image.pixelColor(round(point.x() * ratio), round(point.y() * ratio))
 
 
-def test_default_appearance_is_light_with_40_percent_background_and_16_point_text(window):
+def test_default_appearance_is_light_with_85_percent_background_and_16_point_text(window):
     from PySide6.QtGui import QPalette
     w, e, app = window
     assert w.theme.currentText() == "浅色"
     assert w.font_size.value() == 16
-    assert w.opacity.value() == 40
+    assert w.opacity.value() == 85
     assert w.opacity.minimum() == 0 and w.opacity.maximum() == 100
     assert w.opacity.isEnabled()
-    assert w.opacity_value.text() == "40%"
+    assert w.opacity_value.text() == "85%"
     assert w.windowOpacity() == 1
     for card in (w.draft, w.final):
         for label in (card.en, card.zh):
@@ -139,7 +139,7 @@ def test_default_appearance_is_light_with_40_percent_background_and_16_point_tex
     (1, (238, 242, 246), (0, 0, 0), (89, 101, 121)),
     (2, (17, 24, 39), (241, 245, 249), (148, 163, 184)),
 ])
-@pytest.mark.parametrize("opacity", [0, 40, 100])
+@pytest.mark.parametrize("opacity", [0, 40, 85, 100])
 def test_background_opacity_does_not_stack_or_fade_text_and_borders(
         window, theme, background, foreground, border, opacity):
     from PySide6.QtCore import QPoint
@@ -339,3 +339,40 @@ def test_minimized_window_never_counts_as_display_even_if_platform_is_exposed(wi
     assert observations == []
     w.showNormal(); app.processEvents(); w.grab()
     assert observations
+
+
+def test_language_control_resets_visible_history_and_rejects_queued_old_results(window):
+    from livetranslate.config import ASRConfig
+    w, e, app = window
+    e.source_language = 'en'; e.language_generation = 0
+    e.config = replace(e.config, asr=ASRConfig(engine='qwen3'))
+    w.language.model().item(1).setEnabled(True)
+    def switch(language):
+        e.source_language = language; e.language_generation += 1; e.book.clear()
+        e.bus.put({'kind': 'language', 'generation': e.language_generation, 'source_language': language})
+        return e.language_generation
+    e.switch_language = switch
+    j = SpeechJob(1, 1, b'', 1, 2, 3, monotonic_ns(), True)
+    old = e.book.asr(j, 'Old English caption.'); w.caption(old)
+    w.caption(e.book.translation(TextJob(j, old['text'], monotonic_ns()), '旧字幕。'))
+    assert w.history and w.rows
+    w.language.setCurrentIndex(w.language.findData('ja'))
+    assert e.source_language == 'ja' and not w.history and not w.rows
+    assert '日语' in w.draft.en.text() and not w.final.zh.text()
+    w.caption(old)
+    assert not w.rows
+    new = replace(j, uid=2, source_language='ja', language_generation=1)
+    row = e.book.asr(new, '今日は晴れです。'); w.caption(row)
+    w.poll()  # delayed switch event must not erase the new caption
+    assert w.draft.en.text() == '今日は晴れです。'
+    assert w.language.currentText() == '日语 → 中文'
+    w.language.setCurrentIndex(0)
+    assert e.source_language == 'en' and not w.rows
+    assert w.opacity.value() == 85 and w.font_size.value() == 16
+
+
+def test_english_only_whisper_disables_japanese_choice(window):
+    w, e, app = window
+    assert w.language.itemData(0) == 'en' and w.language.itemData(1) == 'ja'
+    assert not w.language.model().item(1).isEnabled()
+    assert 'Qwen3-ASR' in w.language.model().item(1).toolTip()

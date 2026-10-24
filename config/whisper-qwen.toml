@@ -7,6 +7,7 @@ source = ""
 silence_dbfs = -60.0
 
 [asr]
+language = "en" # en: 英语 → 中文；ja: 日语 → 中文（需要多语言 ASR）
 binary = "../build/whisper-vulkan-d1be6fde11ac/bin/whisper-cli"
 model = "../models/ggml-small.en.bin"
 backend = "vulkan"
@@ -52,5 +53,5 @@ max_job_age_s = 6.0
 inference_timeout_s = 4.0
 history_limit = 80
 font_size = 16
-opacity = 0.4
+opacity = 0.85
 theme = "light"

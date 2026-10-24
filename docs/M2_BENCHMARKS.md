@@ -1,5 +1,7 @@
 # M2 性能与测量方法
 
+2026-10-24 新增英语／日语切换短测：真人日语文件、同一窗口两次语言切换、约 60 秒 HDMI 连续回采及分语言 P50/P95 见 [LANGUAGE_SWITCH.md](LANGUAGE_SWITCH.md)。日语只有两个流式片段，不替代长期或准确率评测。
+
 2026-10-23，Ubuntu 24.04 / RX 9070 XT / Vulkan，真实 HDMI monitor，Qt xcb / XWayland。最终长测 `artifacts/m2-soak-05` 的 acceptance.json 与 analysis.json 均为 **true**。
 
 以下长测数据对应升级前的原生引擎；Whisper v1.9.5 与 llama.cpp 新提交的测量见 [NATIVE_UPGRADE.md](NATIVE_UPGRADE.md)，两次运行的样本数量与测试长度分别列出。

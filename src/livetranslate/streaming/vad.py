@@ -48,7 +48,9 @@ class Segmenter:
         frames = self.frames[:end]
         return SpeechJob(self.uid, self.revision, b"".join(f.pcm for f in frames), self.onset_ns,
                          self.speech_end_ns, frames[-1].end_ns, monotonic_ns(), final, reason,
-                         epoch=frames[0].epoch, continuity=self.continuity)
+                         epoch=frames[0].epoch, continuity=self.continuity,
+                         source_language=frames[0].source_language,
+                         language_generation=frames[0].language_generation)
 
     def _reset(self):
         self.frames = []
@@ -57,6 +59,12 @@ class Segmenter:
 
     def feed(self, frame):
         jobs = []
+        if self.previous and (frame.language_generation != self.previous.language_generation
+                              or frame.source_language != self.previous.source_language):
+            # Discard the unfinished old-language segment and its pre-roll.
+            self._reset()
+            self.previous = None
+            self.continuity += 1
         if self.previous and (frame.epoch != self.previous.epoch or frame.sequence != self.previous.sequence + 1):
             job = self._job(True, "capture_gap") if self.frames else None
             if job: jobs.append(job)

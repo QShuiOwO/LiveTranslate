@@ -19,6 +19,7 @@ import wave
 from ..backends.llama import LlamaTranslator, NoRedirect
 from ..backends.whisper import backend_evidence
 from ..errors import LiveTranslateError
+from ..languages import speech_text, validate_asr_language
 from ..results import save_json
 from ..server import server_command, verify_server_backend
 
@@ -136,14 +137,15 @@ class NativeService:
 
 
 class PersistentASRHTTP:
-    def recognize(self, pcm):
+    def recognize(self, pcm, *, language=None):
+        language = validate_asr_language(self.config.asr, self.config.asr.language if language is None else language)
         self.service.ensure()
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
         boundary = "LiveTranslate" + uuid4().hex
         body = bytearray()
-        for key, value in self.fields.items():
+        for key, value in {**self.fields, "language": language}.items():
             body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode())
         body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="segment.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode())
         body.extend(buffer.getvalue()); body.extend(f"\r\n--{boundary}--\r\n".encode())
@@ -157,12 +159,13 @@ class PersistentASRHTTP:
             data = json.loads(raw)
             if self.config.asr.engine == "qwen3":
                 from ..backends.qwen_asr import transcript_text
-                return transcript_text(data, stop)
+                text = transcript_text(data, stop)
+                return text if speech_text(text) else ""
             if not isinstance(data, dict): raise ValueError("expected JSON object")
             text = data.get("text")
             if not isinstance(text, str): raise ValueError("missing transcript text")
             text = re.sub(r"\s+", " ", text).strip()
-            if not re.search(r"[A-Za-z]", text) or text.upper() in {"[BLANK_AUDIO]", "[SILENCE]"}: return ""
+            if not speech_text(text): return ""
             return text
         except (OSError, ValueError, TypeError) as exc:
             self.service.invalidate()
@@ -181,13 +184,13 @@ class PersistentWhisper(PersistentASRHTTP):
                 raise LiveTranslateError("asr_backend_unverified", "No verified Vulkan model allocation")
             return evidence
         args = [config.stream.whisper_server, "-m", config.asr.model, "-t", str(config.asr.threads),
-                "-l", "en", "-nf", "-nt", "-sns", "-nlp", "-dev", str(config.asr.device),
+                "-l", config.asr.language, "-nf", "-nt", "-sns", "-nlp", "-dev", str(config.asr.device),
                 "--host", "127.0.0.1", "--port", str(config.stream.whisper_port)]
         self.service = NativeService("whisper", args, config.stream.whisper_port, directory, verify, status)
         self.config = config
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
         self.endpoint = "/inference"
-        self.fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0", "language": "en"}
+        self.fields = {"response_format": "json", "temperature": "0", "temperature_inc": "0", "language": config.asr.language}
 
 
 class PersistentQwen(PersistentASRHTTP):
@@ -196,14 +199,14 @@ class PersistentQwen(PersistentASRHTTP):
         model = check_model(config.asr)
         device = verify_device(config.asr)
         args = [config.asr.binary, "serve", str(model), "--device", device_name(config.asr),
-                "--threads", str(config.asr.threads), "--language", "en", "--host", "127.0.0.1",
+                "--threads", str(config.asr.threads), "--language", config.asr.language, "--host", "127.0.0.1",
                 "--port", str(config.asr.server_port)]
         self.service = NativeService("qwen-asr", args, config.asr.server_port, directory,
                                     lambda log: qwen_evidence(log, config.asr, device), status)
         self.config = config
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
         self.endpoint = "/v1/audio/transcriptions"
-        self.fields = {"response_format": "json", "model": MODEL_ID, "language": "en"}
+        self.fields = {"response_format": "json", "model": MODEL_ID, "language": config.asr.language}
 
 
 def persistent_asr(config, directory, status):
@@ -218,9 +221,9 @@ class ManagedTranslator:
                                     lambda log: verify_server_backend(log, config.server.backend, config.server.device), status)
         self.client = LlamaTranslator(replace(config.translation, timeout=config.stream.inference_timeout_s))
 
-    def translate(self, text, *, context=()):
+    def translate(self, text, *, context=(), source_language="en"):
         self.service.ensure()
-        result = self.client.translate(text, context=context)
+        result = self.client.translate(text, context=context, source_language=source_language)
         if not result.success:
             if result.error_code in {"translation_http", "translation_unavailable", "translation_not_ready"}:
                 self.service.invalidate()

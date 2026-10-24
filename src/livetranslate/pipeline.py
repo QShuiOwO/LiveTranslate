@@ -9,16 +9,17 @@ from .results import PipelineResult
 
 class TranslationPipeline:
     def __init__(self, capture: AudioCapture | None, asr: ASRBackend, translator: TranslationBackend,
-                 silence_dbfs: float = -60.0):
+                 silence_dbfs: float = -60.0, source_language: str = "en"):
         self.capture_backend = capture
         self.asr = asr
         self.translator = translator
         self.silence_dbfs = silence_dbfs
+        self.source_language = source_language
 
     def run(self, *, input_file: Path | None = None, duration: float = 15,
             audio_output: Path = Path("artifacts/capture.wav"), source: str | None = None) -> PipelineResult:
         start = perf_counter()
-        result = PipelineResult(audio_file=str(input_file or audio_output))
+        result = PipelineResult(audio_file=str(input_file or audio_output), source_language=self.source_language)
         try:
             if input_file is None:
                 if self.capture_backend is None:
@@ -38,10 +39,11 @@ class TranslationPipeline:
             result.metrics["asr_log"] = asr.log_file
             if not asr.success:
                 raise LiveTranslateError(asr.error_code or "asr_failed", asr.error or "ASR failed")
+            result.source_language = asr.source_language
             result.original_text = asr.transcript
             if not result.original_text.strip():
                 raise LiveTranslateError("asr_empty", "ASR returned empty text")
-            translation = self.translator.translate(asr.transcript)
+            translation = self.translator.translate(asr.transcript, source_language=asr.source_language)
             result.translation_elapsed_ms = translation.elapsed_ms
             result.translation_model = translation.model_name
             result.metrics["translation"] = translation.metrics

@@ -1,6 +1,6 @@
 # LiveTranslate
 
-Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系统播放音频，默认通过 speech.cpp / Qwen3-ASR-1.7B Q8_0 识别，再通过本地 llama.cpp / Hy-MT2-7B Q4_K_M 翻译。新版 whisper.cpp / Small.en 保留为可显式选择的回退配置。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
+Ubuntu 24.04 优先的本地英语／日语识别与简体中文翻译工具。捕获系统播放音频，默认通过 speech.cpp / Qwen3-ASR-1.7B Q8_0 识别，再通过本地 llama.cpp / Hy-MT2-7B Q4_K_M 翻译。新版 whisper.cpp / Small.en 保留为可显式选择的回退配置。M2 提供连续监听、VAD 分段、临时/最终字幕和原生 Qt 双语窗口，保留 M1 文件与批次 demo。Python 3.11+，使用项目独立 Conda 环境；不提供麦克风模式。
 
 真实验收状态见 [M0/M1 报告](docs/M0_M1_REPORT.md)，实测数据见 [性能报告](docs/benchmarks.md)，硬件与依赖见 [环境审计](docs/environment.md)。不要把 doctor 的设备枚举当成 GPU 推理验证。
 
@@ -9,6 +9,8 @@ Ubuntu 24.04 优先的本地英语识别与简体中文翻译工具。捕获系�
 原模型的 M2 HDMI + xcb / XWayland + Vulkan 路径已完成超过 30 分钟真实验收。当前切换为 Qwen3-ASR + HY-MT2 后，160 项测试通过（含 3 项真实模型测试），另通过真实 HDMI 回采及一分钟可见字幕短测，8/8 最终双语字幕完成绘制；新组合按要求未做长测。当前结果见 [模型切换报告](docs/QWEN_HY_UPGRADE.md)。历史结果与测量方法见 [M2 报告](docs/M2_REPORT.md)、[M2 性能](docs/M2_BENCHMARKS.md) 与 [原生引擎升级报告](docs/NATIVE_UPGRADE.md)。
 
 透明双区域界面初版通过 **167 项测试**，并完成 35 秒真实 HDMI 窗口回归（4/4 完整双语绘制）。界面布局与验收说明见 [M2 报告](docs/M2_REPORT.md)。
+
+最新语言切换支持英语／日语 → 简体中文，默认背景不透明度为 85%。246 项测试和约 60 秒真实 HDMI 切换测试通过，详细测量及日语识别质量限制见 [语言切换报告](docs/LANGUAGE_SWITCH.md)。
 
 ## M2 连续双语字幕
 
@@ -19,6 +21,17 @@ livetranslate-start
 ```
 
 该命令链接到项目的 `start.sh`，自动使用 `.conda/bin/python`，优先加载 `config/local.toml`（不存在时使用 `config/default.toml`），以 xcb / XWayland 打开窗口，并加载已有的项目内 Qt 库缓存。无需手动激活 Conda 或设置环境变量；Qwen3-ASR 和 HY-MT2 服务自动启动，关闭窗口即释放程序拥有的服务。本机配置会跟随系统当前选中的声音输出。
+
+窗口顶部提供 **英语 → 中文** 和 **日语 → 中文**。选择后立即用于后续系统音频，无需重载模型；切换会清空当前字幕、字幕历史及翻译上下文，正在处理的旧语言结果会被丢弃，建议在语音停顿时切换。默认仍为英语，选项在本次运行有效；不会修改系统声音输出。当前 Qwen3-ASR + HY-MT2 支持这两个方向，Whisper Small.en 回退配置只能选英语。
+
+可直接以日语模式启动：
+
+```bash
+livetranslate-start --language ja
+# 英语：livetranslate-start --language en
+```
+
+需持久保存启动语言时，在 `config/local.toml` 已有的 `[asr]` 表中设置 `language = "ja"`（不要重复创建表）。`demo`、`transcribe`、`translate` 也支持 `--language en|ja`。日语适配与真实短测的结果、限制见 [语言切换验收](docs/LANGUAGE_SWITCH.md)。
 
 项目目录内也可直接执行 `./start.sh`。支持透传 `live` 的参数，例如 `livetranslate-start --duration 60` 或 `livetranslate-start --help`。相对路径按项目根目录解析；外部路径可传绝对路径。已有 `QT_QPA_PLATFORM` 设置时保留，可用于显式选择其他 Qt 平台。
 
@@ -45,9 +58,9 @@ python -m livetranslate live --config config/local.toml
 
 启动后自动管理本地 Qwen3-ASR 服务（127.0.0.1:8083）与 HY-MT2 翻译服务（127.0.0.1:8080）。已存在、健康的本地 llama-server 可复用，模型别名仍会核对；外部服务不会被本程序终止或擅自重启。程序自己启动的服务会在退出时释放。Qwen3-ASR 由 speech.cpp 加载，不能由 whisper.cpp 加载；回退配置的 Whisper 服务使用 8082。
 
-窗口默认采用浅色主题、40% 背景不透明度、16 号黑色文字和上下两个圆角边框。上框显示识别及翻译中的实时双语字幕，下框保留最近完成的双语字幕；英文识别已完成、中文仍在生成时继续留在上框。两个区域位于同一容器中，随窗口等比例缩放；字号较大或文本较长时在区域内滚动，避免撑开布局。英文确认后不再改写，稳定的临时译文在英文继续增长时保留。
+窗口默认采用浅色主题、85% 背景不透明度、16 号黑色文字和上下两个圆角边框。上框显示识别及翻译中的实时双语字幕，下框保留最近完成的双语字幕；原文识别已完成、中文仍在生成时继续留在上框。两个区域位于同一容器中，随窗口等比例缩放；字号较大或文本较长时在区域内滚动，避免撑开布局。原文确认后不再改写，稳定的临时译文在原文继续增长时保留。
 
-字号、背景不透明度、主题、置顶、字幕历史及停止按钮集中在顶部。“背景”滑块在 0–100% 之间仅调节背景填充，旁边显示百分比；文字、边框及控件保持清晰。上下字幕框共用一层背景，40% 不会因重叠绘制变成更深的颜色。保留浅色、深色和透明黑字主题；透明黑字模式固定无填充，返回浅色或深色时恢复原背景百分比。拖动左上角 LiveTranslate 标题移动窗口，双击标题放大或还原，拖动右下角手柄缩放；右上角可最小化或关闭。开启字幕历史时，历史列表显示在下框内，自动跟随最新字幕；手动上滚后保持阅读位置，重新开启历史恢复跟随。历史条数受配置限制。
+语言、字号、背景不透明度、主题、置顶、字幕历史及停止按钮集中在顶部。“背景”滑块在 0–100% 之间仅调节背景填充，旁边显示百分比；文字、边框及控件保持清晰。上下字幕框共用一层背景，85% 不会因重叠绘制变成更深的颜色。保留浅色、深色和透明黑字主题；透明黑字模式固定无填充，返回浅色或深色时恢复原背景百分比。拖动左上角 LiveTranslate 标题移动窗口，双击标题放大或还原，拖动右下角手柄缩放；右上角可最小化或关闭。开启字幕历史时，历史列表显示在下框内，自动跟随最新字幕；手动上滚后保持阅读位置，重新开启历史恢复跟随。历史条数受配置限制。
 
 背景不透明度通过背景颜色的 alpha 调整，Wayland 下也可使用；置顶行为由桌面合成器决定。窗口可见期间使用临时桌面 idle inhibitor，退出即释放，不改变系统锁屏设置，也不解除手动锁屏。
 
@@ -75,13 +88,13 @@ python -m livetranslate live --config config/local.toml --duration 60 \
 python -m livetranslate live --config config/local.toml --headless --duration 60
 ```
 
-实时翻译默认参考最近最多两段已确认英文（总计最多 800 字符、30 秒音频时间以内），帮助理解口语省略和多义词；上下文仅供参考，输出只翻译当前段。每个任务固定自己的上下文，缓存也按上下文区分；音源切换、采集重连和丢帧后使用新历史。可在已有 `[translation]` 表内设置 `context_segments`、`context_max_chars`、`context_max_age_s`，其中 `context_segments = 0` 关闭此功能。原始英文不做词语替换，详见 [上下文修正与真实回归](docs/TRANSLATION_CONTEXT.md)。
+实时翻译默认参考最近最多两段已确认原文（总计最多 800 字符、30 秒音频时间以内），帮助理解口语省略和多义词；上下文仅供参考，输出只翻译当前段。每个任务固定自己的上下文，缓存也按上下文区分；语言切换、音源切换、采集重连和丢帧后使用新历史。可在已有 `[translation]` 表内设置 `context_segments`、`context_max_chars`、`context_max_age_s`，其中 `context_segments = 0` 关闭此功能。原文不做词语替换，详见 [上下文修正与真实回归](docs/TRANSLATION_CONTEXT.md)。
 
 每次运行使用新的目录，保存 events.jsonl、模型日志、资源数据及 summary.json；默认目录自动命名。日志轮转，音频只在内存的有限帧/分段中处理，不连续写录音。状态栏会提示断开、恢复或旧任务丢弃。停止按钮、关闭窗口和 Ctrl+C 都会结束采集、排空有限队列并释放拥有的子进程。
 
 配置 `[stream]` 控制 VAD、停顿、临时识别间隔、最长分段、队列、超时和外观，见 [架构说明](docs/M2_ARCHITECTURE.md)。旧 M1 配置继续可用：`[asr] engine` 缺省为 `whisper`，其常驻服务从 whisper-cli 同目录推导。当前默认配置显式设置 `engine = "qwen3"`、`server_port = 8083`，常驻和文件识别共用 speech 可执行文件。字幕延迟从 VAD 语音帧进入应用算到可见文字控件实际完成绘制；截图重绘和隐藏窗口不计入，详细测量边界见性能文档。
 
-真实 HDMI 自动验收会播放所给的英语文件：
+真实 HDMI 自动验收会播放所给的语音文件（配置中的 `asr.language` 应与语音一致）：
 
 ```bash
 python scripts/validate_stream.py --config config/local.toml --duration 35 \

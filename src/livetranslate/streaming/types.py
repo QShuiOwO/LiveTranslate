@@ -14,6 +14,8 @@ class AudioFrame:
     start_ns: int
     end_ns: int
     epoch: int = 0
+    source_language: str = "en"
+    language_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,8 @@ class SpeechJob:
     reason: str = "partial"
     epoch: int = 0
     continuity: int = 0
+    source_language: str = "en"
+    language_generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,5 +55,5 @@ class ContinuousAudioSource(Protocol):
 
 
 class StreamingASR(Protocol):
-    def recognize(self, pcm: bytes) -> str: ...
+    def recognize(self, pcm: bytes, *, language: str = "en") -> str: ...
     def close(self) -> None: ...

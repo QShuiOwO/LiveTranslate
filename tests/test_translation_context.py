@@ -140,7 +140,7 @@ class Source:
 
 class ASR:
     def __init__(self, texts): self.texts = texts
-    def recognize(self, pcm): return self.texts[pcm]
+    def recognize(self, pcm, *, language="en"): return self.texts[pcm]
     def close(self): pass
 
 
@@ -149,7 +149,7 @@ class Translator:
         self.calls = []
         self.fail_text = fail_text
 
-    def translate(self, text, *, context=()):
+    def translate(self, text, *, context=(), source_language="en"):
         self.calls.append((text, context))
         if text == self.fail_text:
             raise LiveTranslateError("translation_unavailable", "Simulated local service outage")

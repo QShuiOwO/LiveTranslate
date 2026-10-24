@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from ..audio.wav import inspect_wav
 from ..errors import LiveTranslateError
+from ..languages import speech_text, validate_asr_language
 from ..process import run_command
 from ..results import ASRResult
 from ..telemetry import GPUSampler
@@ -76,9 +77,10 @@ class QwenASRBackend:
 
     def transcribe(self, audio_file):
         start = perf_counter()
-        result = ASRResult(model_name=Path(self.config.model).name)
+        result = ASRResult(source_language=self.config.language, model_name=Path(self.config.model).name)
         sampler = GPUSampler()
         try:
+            validate_asr_language(self.config, self.config.language)
             audio = inspect_wav(Path(audio_file), self.silence_dbfs)
             model = check_model(self.config)
             selected = verify_device(self.config)
@@ -86,7 +88,7 @@ class QwenASRBackend:
             log = self.output_dir / f"qwen-asr-{uuid4().hex[:12]}.log"
             result.log_file = str(log)
             args = [self.config.binary, "asr", str(model), "--device", device_name(self.config),
-                    "--threads", str(self.config.threads), "--language", "en", "--format", "json",
+                    "--threads", str(self.config.threads), "--language", self.config.language, "--format", "json",
                     str(Path(audio_file).resolve())]
             with sampler:
                 try:
@@ -102,8 +104,8 @@ class QwenASRBackend:
             except ValueError as exc:
                 raise LiveTranslateError("asr_output_invalid", f"Invalid speech.cpp JSON: {exc}") from exc
             result.transcript = transcript_text(data, data.get("stop") if isinstance(data, dict) else None)
-            if not result.transcript or not re.search(r"[A-Za-z]", result.transcript):
-                raise LiveTranslateError("asr_empty", "Qwen3-ASR returned no English speech")
+            if not speech_text(result.transcript):
+                raise LiveTranslateError("asr_empty", "Qwen3-ASR returned no speech")
             result.gpu_evidence = backend_evidence(proc.stderr, self.config, selected)
             result.backend = self.config.backend
             result.metrics.update(audio_duration_ms=audio.duration_ms, languages=data.get("languages", []), engine="speech.cpp")

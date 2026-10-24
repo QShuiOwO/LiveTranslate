@@ -36,6 +36,7 @@ class ASRResult:
     success: bool = False
     error: str | None = None
     error_code: str | None = None
+    source_language: str = "en"
     gpu_evidence: list[str] = field(default_factory=list)
     log_file: str | None = None
     metrics: dict = field(default_factory=dict)
