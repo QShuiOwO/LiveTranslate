@@ -58,3 +58,4 @@ history_limit = 80
 font_size = 16
 opacity = 0.85
 theme = "light"
+subtitle_mode = "dual" # single: 单框底部追加、向上滚动

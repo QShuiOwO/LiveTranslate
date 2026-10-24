@@ -80,6 +80,7 @@ class StreamConfig:
     font_size: int = 16
     opacity: float = 0.85
     theme: str = "light"
+    subtitle_mode: str = "dual"
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,8 @@ def validate(config: Config) -> Config:
             raise LiveTranslateError("config", f"stream.{name} must be {'an integer ' if isinstance(default, int) else ''}between {low} and {high}")
     if stream.theme not in {"transparent", "dark", "light"}:
         raise LiveTranslateError("config", "Stream theme must be transparent/dark/light")
+    if stream.subtitle_mode not in {"dual", "single"}:
+        raise LiveTranslateError("config", "stream.subtitle_mode must be dual or single")
     if stream.min_partial_ms >= stream.max_segment_ms or stream.min_speech_ms >= stream.end_silence_ms:
         raise LiveTranslateError("config", "Stream speech/partial duration must precede segment boundaries")
     return replace(config, translation=replace(t, base_url=local_base_url(t.base_url)))

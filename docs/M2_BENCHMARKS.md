@@ -1,5 +1,7 @@
 # M2 性能与测量方法
 
+2026-10-24 单框滚动显示短测：32.59 秒会话、30.34 秒 PCM、8/8 最终双语可见，零错误/丢弃/最终改写。起声→原文 P50/P95 1078.61/1195.63 ms，起声→中文 2663.32/3560.21 ms，语音结束→最终双语 759.98/842.01 ms。真人 JFK 重复播放存在正常推理缓存命中；仅为显示路径小样本回归。方法和证据见 [M2_REPORT.md](M2_REPORT.md) 的单框滚动条目。
+
 2026-10-24 新增英语／日语切换短测：真人日语文件、同一窗口两次语言切换、约 60 秒 HDMI 连续回采及分语言 P50/P95 见 [LANGUAGE_SWITCH.md](LANGUAGE_SWITCH.md)。日语只有两个流式片段，不替代长期或准确率评测。
 
 2026-10-23，Ubuntu 24.04 / RX 9070 XT / Vulkan，真实 HDMI monitor，Qt xcb / XWayland。最终长测 `artifacts/m2-soak-05` 的 acceptance.json 与 analysis.json 均为 **true**。

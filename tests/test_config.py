@@ -51,3 +51,9 @@ def test_cloud_dns_and_unsafe_urls_rejected(url):
 
 def test_local_v1_url_normalizes():
     assert local_base_url("http://127.0.0.1:8080/v1/") == "http://127.0.0.1:8080"
+
+
+def test_invalid_subtitle_mode_is_explained(tmp_path):
+    p = tmp_path / 'settings.toml'; p.write_text('[stream]\nsubtitle_mode="unknown"\n')
+    with pytest.raises(LiveTranslateError, match='subtitle_mode'):
+        load_config(p)

@@ -376,3 +376,170 @@ def test_english_only_whisper_disables_japanese_choice(window):
     assert w.language.itemData(0) == 'en' and w.language.itemData(1) == 'ja'
     assert not w.language.model().item(1).isEnabled()
     assert 'Qwen3-ASR' in w.language.model().item(1).toolTip()
+
+
+def settle(app):
+    for _ in range(6): app.processEvents()
+
+
+def timeline_sentence(window, uid, final=True, text=None):
+    w, e, app = window
+    job = SpeechJob(uid, 1, b'', 1, 2, 3, monotonic_ns(), final)
+    text = text or f'Sentence {uid}: the next subtitle arrives at the bottom.'
+    w.caption(e.book.asr(job, text))
+    w.caption(e.book.translation(TextJob(job, text, monotonic_ns()), f'第 {uid} 条字幕出现在底部。'))
+    settle(app)
+    return job
+
+
+def test_single_mode_has_one_frame_and_appends_new_speech_at_bottom(window):
+    from PySide6.QtCore import QPoint
+    w, e, app = window
+    w.single_mode.setChecked(True); settle(app)
+    assert w.timeline.isVisible() and not w.draft.isVisible() and not w.final.isVisible()
+    assert not w.show_history.isEnabled()
+    assert w.timeline.parentWidget() is w.subtitle_container
+    assert w.timeline.geometry() == w.subtitle_container.rect()
+    timeline_sentence(window, 1)
+    first = w.timeline.cards[1]
+    before = first.mapTo(w.timeline.scroll.viewport(), QPoint(0, 0)).y()
+    timeline_sentence(window, 2, final=False)
+    second = w.timeline.cards[2]
+    assert list(w.timeline.cards) == [1, 2]
+    assert first.mapTo(w.timeline.scroll.viewport(), QPoint(0, 0)).y() < before
+    assert first.geometry().bottom() < second.geometry().top()
+    content = w.timeline.scroll.widget()
+    assert abs(second.geometry().bottom() - content.height() + 1) <= 2
+    assert not second.en.visibleRegion().isEmpty() and not second.zh.visibleRegion().isEmpty()
+
+
+def test_single_mode_updates_draft_to_final_in_place_and_keeps_order(window):
+    w, e, app = window
+    w.single_mode.setChecked(True)
+    j = timeline_sentence(window, 1, final=False)
+    card = w.timeline.cards[1]
+    final = replace(j, revision=2, final=True)
+    text = 'The first sentence is now complete.'
+    w.caption(e.book.asr(final, text))
+    # New speech can arrive while the previous final translation is still running.
+    timeline_sentence(window, 2, final=False)
+    w.caption(e.book.translation(TextJob(final, text, monotonic_ns()), '第一句已完成。'))
+    settle(app)
+    assert list(w.timeline.cards) == [1, 2] and w.timeline.cards[1] is card
+    assert card.en.text() == text and card.zh.text() == '第一句已完成。'
+    assert '识别完成' in card.badge.text()
+    assert card.geometry().bottom() < w.timeline.cards[2].geometry().top()
+    assert '正在识别' in w.timeline.cards[2].badge.text()
+    row = dict(card.snapshot)
+    w.caption({**row, 'text': 'Late incorrect overwrite', 'translated': '错误覆盖'})
+    assert card.en.text() == text and card.zh.text() == '第一句已完成。'
+
+
+def test_single_mode_follows_latest_until_user_scrolls_and_resumes_on_click(window):
+    w, e, app = window
+    w.resize(700, 420); w.single_mode.setChecked(True)
+    for uid in range(1, 7): timeline_sentence(window, uid)
+    bar = w.timeline.scroll.verticalScrollBar()
+    assert bar.maximum() > 0 and bar.value() == bar.maximum()
+    bar.setValue(0); settle(app)
+    assert not w.timeline.follow_latest and w.timeline.latest_button.isVisible()
+    timeline_sentence(window, 7)
+    assert bar.value() == 0, 'A new subtitle must not interrupt reading earlier subtitles'
+    w.timeline.latest_button.click(); settle(app)
+    assert w.timeline.follow_latest and bar.value() == bar.maximum()
+    timeline_sentence(window, 8)
+    assert bar.value() == bar.maximum()
+    assert not w.timeline.latest_button.isVisible()
+
+
+def test_mode_switch_retains_existing_content_without_duplicates(window):
+    w, e, app = window
+    timeline_sentence(window, 1)
+    timeline_sentence(window, 2, final=False)
+    w.show_history.setChecked(True)
+    for _ in range(3):
+        w.single_mode.setChecked(True); settle(app)
+        assert list(w.timeline.cards) == [1, 2]
+        assert w.timeline.cards[1].snapshot['zh_final']
+        assert not w.timeline.cards[2].snapshot['final']
+        assert w.history_insertions == 1
+        w.single_mode.setChecked(False); settle(app)
+        assert w.draft.isVisible() and w.final.isVisible() and not w.timeline.isVisible()
+        assert w.scroll.isVisible() and w.show_history.isEnabled()
+        assert not w.timeline.cards
+        assert w.draft.snapshot['uid'] == 2 and w.final.snapshot['uid'] == 1
+
+
+def test_single_mode_has_bounded_rows_and_never_resurrects_evicted_finals(window):
+    w, e, app = window
+    w.single_mode.setChecked(True)
+    for uid in range(1, 26): timeline_sentence(window, uid)
+    assert len(w.timeline.cards) == e.config.stream.history_limit + 4
+    assert list(w.timeline.cards) == list(range(17, 26))
+    latest = dict(w.timeline.cards[25].snapshot)
+    w.caption({**latest, 'uid': 1})
+    assert list(w.timeline.cards) == list(range(17, 26))
+    assert w.timeline.body.count() == len(w.timeline.cards) + 2
+    assert w.timeline.scroll.verticalScrollBar().value() == w.timeline.scroll.verticalScrollBar().maximum()
+
+
+def test_single_mode_language_reset_clears_all_rows_and_keeps_mode(window):
+    w, e, app = window
+    w.single_mode.setChecked(True)
+    timeline_sentence(window, 1)
+    old = dict(w.timeline.cards[1].snapshot)
+    e.source_language = 'ja'; e.language_generation = 1; e.book.clear()
+    w._sync_language(); settle(app)
+    assert not w.timeline.cards and w.timeline.placeholder.isVisible()
+    assert w.single_mode.isChecked() and w.timeline.isVisible()
+    w.caption(old)
+    assert not w.timeline.cards
+    j = SpeechJob(2, 1, b'', 1, 2, 3, monotonic_ns(), False, source_language='ja', language_generation=1)
+    w.caption(e.book.asr(j, '新しい字幕は下に表示されます。'))
+    settle(app)
+    assert list(w.timeline.cards) == [2] and '新しい' in w.timeline.cards[2].en.text()
+
+
+@pytest.mark.parametrize('opacity', [0, 85])
+def test_single_mode_resizes_and_preserves_background_only_opacity(window, opacity):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QPalette
+    w, e, app = window
+    w.single_mode.setChecked(True); w.opacity.setValue(opacity)
+    for uid in range(1, 4): timeline_sentence(window, uid)
+    w.font_size.setValue(30)
+    for width, height in ((700, 420), (1200, 900)):
+        w.resize(width, height); settle(app)
+        assert w.timeline.geometry() == w.subtitle_container.rect()
+        assert w.timeline.scroll.viewport().width() < w.timeline.width()
+        for card in w.timeline.cards.values():
+            assert card.en.font().pointSize() == 30
+            assert card.en.palette().color(QPalette.ColorRole.WindowText).name() == '#000000'
+            assert card.en.wordWrap() and card.zh.wordWrap()
+        # Both the outer frame and inner entries share the same one background layer.
+        image = rendered_window(w)
+        point = w.timeline.mapTo(w, QPoint(8, w.timeline.height() // 2))
+        assert pixel_at(image, point).alpha() == round(255 * opacity / 100)
+        assert w.windowOpacity() == 1
+    w.theme.setCurrentIndex(2); settle(app)
+    assert w.timeline.cards[3].en.palette().color(QPalette.ColorRole.WindowText).name() == '#f1f5f9'
+
+
+def test_initial_single_mode_from_config(tmp_path, monkeypatch):
+    from livetranslate.config import load_config
+    from livetranslate.streaming.gui import SubtitleWindow
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    app = QApplication.instance() or QApplication([])
+    p = tmp_path / 'single.toml'; p.write_text('[stream]\nsubtitle_mode="single"\n')
+    e = SimpleNamespace(config=load_config(p), presentation='', bus=EventBus(), book=CaptionBook(),
+                        metrics=SimpleNamespace(event=lambda *a, **k: None), presentation_details={},
+                        finished=threading.Event(), presented=lambda *a: None, request_stop=lambda: None)
+    w = SubtitleWindow(e)
+    try:
+        w.show(); settle(app)
+        assert w.single_mode.isChecked() and w.timeline.isVisible()
+        assert not w.draft.isVisible() and not w.final.isVisible()
+        assert e.presentation_details['subtitle_mode'] == 'single'
+    finally:
+        w.timer.stop(); w.allow_close = True; w.close(); app.processEvents()

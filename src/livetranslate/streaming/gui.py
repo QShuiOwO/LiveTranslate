@@ -172,6 +172,87 @@ class CaptionCard(QFrame):
         self.zh.clear(); self.zh.hide(); self.notice.clear(); self.notice.hide()
 
 
+class CaptionTimeline(QFrame):
+    """One bounded, bottom-aligned timeline; a segment keeps its widget through finalization."""
+    def __init__(self, engine):
+        super().__init__()
+        self.engine = engine
+        self.cards = OrderedDict()
+        self.limit = engine.config.stream.history_limit + 4
+        self.follow_latest = True
+        self.adjusting = False
+        self.setObjectName("timelineCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 14, 20, 16)
+        header = QHBoxLayout()
+        title = QLabel("实时双语 · 滚动字幕"); title.setObjectName("badge")
+        header.addWidget(title); header.addStretch()
+        self.latest_button = QPushButton("回到最新")
+        self.latest_button.setAccessibleName("回到最新字幕并自动跟随")
+        self.latest_button.clicked.connect(self.bottom)
+        self.latest_button.hide(); header.addWidget(self.latest_button)
+        layout.addLayout(header)
+        self.scroll = transparent_scroll()
+        content = QWidget()
+        self.body = QVBoxLayout(content)
+        self.body.setContentsMargins(0, 0, 0, 0); self.body.setSpacing(8)
+        self.body.addStretch(1)
+        self.placeholder = QLabel("等待系统音频，字幕将在底部出现…")
+        self.placeholder.setWordWrap(True)
+        self.body.addWidget(self.placeholder)
+        self.scroll.setWidget(content); content.setAutoFillBackground(False)
+        layout.addWidget(self.scroll, 1)
+        bar = self.scroll.verticalScrollBar()
+        bar.rangeChanged.connect(self._range)
+        bar.valueChanged.connect(self._position)
+
+    def bottom(self):
+        self.follow_latest = True
+        self.latest_button.hide()
+        self.adjusting = True
+        try:
+            bar = self.scroll.verticalScrollBar()
+            bar.setValue(bar.maximum())
+        finally:
+            self.adjusting = False
+
+    def _range(self, minimum, maximum):
+        if self.follow_latest: self.bottom()
+
+    def _position(self, value):
+        if self.adjusting: return
+        self.follow_latest = value >= self.scroll.verticalScrollBar().maximum() - 4
+        self.latest_button.setVisible(not self.follow_latest)
+
+    def clear(self):
+        for card in self.cards.values():
+            self.body.removeWidget(card); card.hide(); card.deleteLater()
+        self.cards.clear()
+        self.placeholder.show()
+        self.bottom()
+
+    def apply(self, row, font_size):
+        uid = row["uid"]
+        if uid not in self.cards:
+            card = CaptionCard(self.engine, history=True)
+            card.setObjectName("timelineEntry")
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            self.cards[uid] = card
+            self.cards = OrderedDict(sorted(self.cards.items()))
+            # Index 0 is the stretch, 1 the hidden placeholder. Late translations
+            # update their original position instead of jumping below newer speech.
+            self.body.insertWidget(2 + list(self.cards).index(uid), card)
+            while len(self.cards) > self.limit:
+                _, old = self.cards.popitem(last=False)
+                self.body.removeWidget(old); old.hide(); old.deleteLater()
+        card = self.cards.get(uid)
+        if card is None: return
+        self.placeholder.hide()
+        card.apply(row)
+        for label in (card.en, card.zh): label.setFont(QFont("Noto Sans CJK SC", font_size))
+
+
 class SubtitleWindow(QMainWindow):
     def __init__(self, engine, duration=None, screenshot=None):
         super().__init__()
@@ -218,6 +299,10 @@ class SubtitleWindow(QMainWindow):
         self.close_button.setAccessibleName("关闭字幕窗口")
         self.close_button.clicked.connect(self.close)
         header.addWidget(self.drag_handle); header.addWidget(self.status_label, 1)
+        self.single_mode = QCheckBox("单框滚动")
+        self.single_mode.setAccessibleName("单字幕框滚动模式")
+        self.single_mode.setToolTip("在一个框内从底部追加字幕；旧字幕向上滚动")
+        header.addWidget(self.single_mode)
         self.language = QComboBox()
         self.language.setAccessibleName("识别与翻译语言")
         self.language.setToolTip("切换后从新音频开始识别，并清空当前字幕和历史")
@@ -272,6 +357,8 @@ class SubtitleWindow(QMainWindow):
         self.final.en.setText("完成的原文和中文译文将显示在这里")
         self.final.zh.hide()
         subtitles.addWidget(self.draft, 1); subtitles.addWidget(self.final, 1)
+        self.timeline = CaptionTimeline(engine)
+        subtitles.addWidget(self.timeline, 1); self.timeline.hide()
         layout.addWidget(self.subtitle_container, 1)
         self.scroll = transparent_scroll()
         history_widget = QWidget(); self.history_layout = QVBoxLayout(history_widget)
@@ -299,6 +386,9 @@ class SubtitleWindow(QMainWindow):
         self.on_top.toggled.connect(self._top)
         self.show_history.toggled.connect(self._history)
         self.language.currentIndexChanged.connect(self._language_changed)
+        self.single_mode.toggled.connect(self._subtitle_mode)
+        self.single_mode.setChecked(engine.config.stream.subtitle_mode == "single")
+        self.engine.presentation_details["subtitle_mode"] = engine.config.stream.subtitle_mode
         self.appearance()
         self.timer = QTimer(self); self.timer.setInterval(33); self.timer.timeout.connect(self.poll); self.timer.start()
         self._old_sigint = signal.signal(signal.SIGINT, lambda *args: self.request_stop("SIGINT"))
@@ -327,6 +417,7 @@ class SubtitleWindow(QMainWindow):
             self.history_layout.removeWidget(card)
             card.hide(); card.deleteLater()
         self.history.clear()
+        self.timeline.clear()
         self.latest_draft = self.latest_final = 0
         self.follow_history = True
         self.draft.clear_draft(); self.final.clear_draft()
@@ -334,6 +425,22 @@ class SubtitleWindow(QMainWindow):
         self.final.badge.setText("识别完成 · 双语字幕")
         self.final.en.setText("完成的原文和中文译文将显示在这里")
         self.status_label.setText(f"● 已切换为{LANGUAGES[language]} → 中文，正在监听新音频")
+
+    def _subtitle_mode(self, single):
+        self.draft.setVisible(not single); self.final.setVisible(not single)
+        self.timeline.setVisible(single)
+        self.show_history.setEnabled(not single)
+        self.show_history.setToolTip("单框模式已包含字幕历史" if single else "在下框查看已完成字幕")
+        self.timeline.clear()
+        if single:
+            for row in sorted(self.rows.values(), key=lambda row: row["uid"]):
+                self.timeline.apply(row, self.font_size.value())
+            self.timeline.bottom()
+        self.resource_label.setText("新字幕在底部更新 · 旧字幕向上滚动" if single
+                                    else "上方实时更新 · 下方保留已完成双语字幕")
+        mode = "single" if single else "dual"
+        self.engine.presentation_details["subtitle_mode"] = mode
+        self.engine.metrics.event("subtitle_mode_changed", mode=mode)
 
     def _top(self, enabled):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
@@ -375,8 +482,9 @@ class SubtitleWindow(QMainWindow):
         self.setStyleSheet(f"""
         QWidget {{ background: transparent; color: {text}; }}
         QWidget#mainSurface {{ background: {background}; border-radius: 16px; }}
-        QFrame#draftCard, QFrame#finalCard {{ background: transparent; border: 1px solid {border}; border-radius: 20px; }}
+        QFrame#draftCard, QFrame#finalCard, QFrame#timelineCard {{ background: transparent; border: 1px solid {border}; border-radius: 20px; }}
         QFrame#historyCard {{ background: transparent; border: none; border-bottom: 1px solid {border}; }}
+        QFrame#timelineEntry {{ background: transparent; border: none; }}
         QLabel#brand {{ font-size: 15px; font-weight: 700; }}
         QLabel#badge {{ color: {text}; font-size: 12px; font-weight: 600; }}
         QLabel#muted, QLabel#status, QLabel#notice {{ color: {text}; font-size: 12px; }}
@@ -396,7 +504,7 @@ class SubtitleWindow(QMainWindow):
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
         size = self.font_size.value()
-        for card_widget in [self.draft, self.final, *self.history.values()]:
+        for card_widget in [self.draft, self.final, *self.history.values(), *self.timeline.cards.values()]:
             card_widget.en.setFont(QFont("Noto Sans CJK SC", size))
             card_widget.zh.setFont(QFont("Noto Sans CJK SC", size))
 
@@ -443,6 +551,7 @@ class SubtitleWindow(QMainWindow):
             if previous["zh_final"] and previous["translated"] != row["translated"]: return
         self.rows[uid] = row
         while len(self.rows) > self.engine.config.stream.history_limit + 4: self.rows.popitem(last=False)
+        if self.single_mode.isChecked(): self.timeline.apply(row, self.font_size.value())
         if not row["zh_final"]:
             if uid >= self.latest_draft and uid > self.latest_final:
                 self.latest_draft = uid; self.draft.apply(row)
@@ -491,7 +600,8 @@ class SubtitleWindow(QMainWindow):
         signal.signal(signal.SIGTERM, self._old_sigterm)
         if self.inhibitor: self.inhibitor.close()
         self.engine.presentation_details.update(history_insertions=self.history_insertions,
-                                                retained_history=len(self.history), retained_rows=len(self.rows))
+                                                retained_history=len(self.history), retained_rows=len(self.rows),
+                                                retained_timeline=len(self.timeline.cards))
         self.engine.metrics.event("gui_closed", history_insertions=self.history_insertions,
                                   retained_history=len(self.history), retained_rows=len(self.rows))
         event.accept()
