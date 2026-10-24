@@ -427,9 +427,9 @@ def test_single_mode_updates_draft_to_final_in_place_and_keeps_order(window):
     settle(app)
     assert list(w.timeline.cards) == [1, 2] and w.timeline.cards[1] is card
     assert card.en.text() == text and card.zh.text() == '第一句已完成。'
-    assert '识别完成' in card.badge.text()
+    assert not card.badge.isVisible()
     assert card.geometry().bottom() < w.timeline.cards[2].geometry().top()
-    assert '正在识别' in w.timeline.cards[2].badge.text()
+    assert not w.timeline.cards[2].badge.isVisible()
     row = dict(card.snapshot)
     w.caption({**row, 'text': 'Late incorrect overwrite', 'translated': '错误覆盖'})
     assert card.en.text() == text and card.zh.text() == '第一句已完成。'
@@ -442,14 +442,14 @@ def test_single_mode_follows_latest_until_user_scrolls_and_resumes_on_click(wind
     bar = w.timeline.scroll.verticalScrollBar()
     assert bar.maximum() > 0 and bar.value() == bar.maximum()
     bar.setValue(0); settle(app)
-    assert not w.timeline.follow_latest and w.timeline.latest_button.isVisible()
+    assert not w.timeline.follow_latest
     timeline_sentence(window, 7)
     assert bar.value() == 0, 'A new subtitle must not interrupt reading earlier subtitles'
-    w.timeline.latest_button.click(); settle(app)
+    w.latest_action.trigger(); settle(app)
     assert w.timeline.follow_latest and bar.value() == bar.maximum()
     timeline_sentence(window, 8)
     assert bar.value() == bar.maximum()
-    assert not w.timeline.latest_button.isVisible()
+    assert not w.timeline.scroll.verticalScrollBar().isVisible()
 
 
 def test_mode_switch_retains_existing_content_without_duplicates(window):
@@ -479,7 +479,7 @@ def test_single_mode_has_bounded_rows_and_never_resurrects_evicted_finals(window
     latest = dict(w.timeline.cards[25].snapshot)
     w.caption({**latest, 'uid': 1})
     assert list(w.timeline.cards) == list(range(17, 26))
-    assert w.timeline.body.count() == len(w.timeline.cards) + 2
+    assert w.timeline.body.count() == len(w.timeline.cards) + 1
     assert w.timeline.scroll.verticalScrollBar().value() == w.timeline.scroll.verticalScrollBar().maximum()
 
 
@@ -490,7 +490,7 @@ def test_single_mode_language_reset_clears_all_rows_and_keeps_mode(window):
     old = dict(w.timeline.cards[1].snapshot)
     e.source_language = 'ja'; e.language_generation = 1; e.book.clear()
     w._sync_language(); settle(app)
-    assert not w.timeline.cards and w.timeline.placeholder.isVisible()
+    assert not w.timeline.cards
     assert w.single_mode.isChecked() and w.timeline.isVisible()
     w.caption(old)
     assert not w.timeline.cards
@@ -543,3 +543,145 @@ def test_initial_single_mode_from_config(tmp_path, monkeypatch):
         assert e.presentation_details['subtitle_mode'] == 'single'
     finally:
         w.timer.stop(); w.allow_close = True; w.close(); app.processEvents()
+
+
+def test_caption_only_surface_has_no_visible_controls_status_or_placeholder(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QLabel, QAbstractButton
+    w, e, app = window
+    w.single_mode.setChecked(True); settle(app)
+    assert not w.toolbar.isVisible() and not w.resource_label.isVisible() and not w.size_grip.isVisible()
+    assert not any(label.isVisible() for label in w.findChildren(QLabel))
+    assert not any(button.isVisible() for button in w.findChildren(QAbstractButton))
+    assert w.timeline.mapTo(w, QPoint(0, 0)) == QPoint(0, 0)
+    assert w.timeline.size() == w.size()
+    timeline_sentence(window, 1)
+    w.caption(e.book.failure(1, 'A simulated error must not become a subtitle'))
+    settle(app)
+    card = w.timeline.cards[1]
+    assert {label.text() for label in w.findChildren(QLabel) if label.isVisible()} == {card.en.text(), card.zh.text()}
+    assert not card.badge.isVisible() and not card.notice.isVisible()
+    w.resize(320, 140); settle(app)
+    assert w.width() == 320 and w.height() == 140
+    w.restore_action.trigger(); settle(app)
+    assert not w.single_mode.isChecked() and w.toolbar.isVisible() and w.resource_label.isVisible()
+    assert w.size_grip.isVisible() and w.width() >= 700 and w.height() >= 420
+
+
+def send_pointer(widget, kind, position, button, buttons):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+    event = QMouseEvent(kind, QPointF(widget.mapFromGlobal(position)), QPointF(position),
+                        button, buttons, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, event)
+
+
+def test_long_press_on_new_subtitle_text_moves_window_and_release_stops(window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtTest import QTest
+    w, e, app = window
+    w.single_mode.setChecked(True); timeline_sentence(window, 1)
+    label = w.timeline.cards[1].en
+    gestures = w.surface_gestures
+    # Shortened timer keeps the test fast; production uses 350 ms.
+    gestures.hold.setInterval(20)
+    native_calls = []
+    monkeypatch.setattr(type(w.windowHandle()), 'startSystemMove', lambda self: native_calls.append(True) or False)
+    monkeypatch.setattr(type(w), 'grabMouse', lambda self: None)
+    position = label.mapToGlobal(label.rect().center())
+    before = w.pos()
+    send_pointer(label, QEvent.Type.MouseButtonPress, position, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    assert gestures.hold.isActive() and not gestures.dragging and w.pos() == before
+    QTest.qWait(40)
+    assert gestures.dragging and gestures.manual and native_calls == [True]
+    delta = QPoint(35, 20)
+    send_pointer(label, QEvent.Type.MouseMove, position + delta, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert w.pos() == before + delta
+    send_pointer(label, QEvent.Type.MouseButtonRelease, position + delta, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    assert not gestures.dragging and not gestures.pressed and not gestures.hold.isActive()
+    send_pointer(label, QEvent.Type.MouseMove, position + 2*delta, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton)
+    assert w.pos() == before + delta
+
+
+def test_short_click_and_early_swipe_do_not_trigger_window_drag(window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtTest import QTest
+    w, e, app = window
+    w.single_mode.setChecked(True); settle(app)
+    surface = w.timeline.scroll.viewport()
+    gesture = w.surface_gestures; gesture.hold.setInterval(20)
+    calls = []
+    monkeypatch.setattr(type(w.windowHandle()), 'startSystemMove', lambda self: calls.append(True) or True)
+    position = surface.mapToGlobal(surface.rect().center())
+    before = w.pos()
+    send_pointer(surface, QEvent.Type.MouseButtonPress, position, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    send_pointer(surface, QEvent.Type.MouseButtonRelease, position, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    QTest.qWait(35)
+    assert not calls and w.pos() == before
+    send_pointer(surface, QEvent.Type.MouseButtonPress, position, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    send_pointer(surface, QEvent.Type.MouseMove, position + QPoint(40, 0), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    QTest.qWait(35)
+    assert not calls and w.pos() == before
+    send_pointer(surface, QEvent.Type.MouseButtonRelease, position, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+
+
+def test_native_move_and_mode_change_cancel_pending_hold(window, monkeypatch):
+    from PySide6.QtCore import QEvent, Qt
+    w, e, app = window
+    w.single_mode.setChecked(True); settle(app)
+    surface = w.timeline.scroll.viewport(); g = w.surface_gestures
+    position = surface.mapToGlobal(surface.rect().center())
+    native = []
+    monkeypatch.setattr(type(w.windowHandle()), 'startSystemMove', lambda self: native.append(True) or True)
+    monkeypatch.setattr(type(w), 'grabMouse', lambda self: pytest.fail('Native move must not grab mouse a second time'))
+    send_pointer(surface, QEvent.Type.MouseButtonPress, position, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    g.hold.stop(); g.begin_move()
+    assert native == [True] and g.dragging and not g.manual
+    w.restore_action.trigger(); settle(app)
+    assert not g.pressed and not g.hold.isActive() and not g.dragging
+    g.begin_move()
+    assert native == [True]
+
+
+def test_caption_right_click_menu_and_escape_restore_controls(window):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QContextMenuEvent
+    from PySide6.QtTest import QTest
+    w, e, app = window
+    w.single_mode.setChecked(True); timeline_sentence(window, 1)
+    label = w.timeline.cards[1].en; point = label.rect().center()
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, point, label.mapToGlobal(point))
+    app.sendEvent(label, event); settle(app)
+    assert w.subtitle_menu.isVisible()
+    assert w.restore_action in w.subtitle_menu.actions()
+    w.subtitle_menu.hide(); w.restore_action.trigger(); settle(app)
+    assert w.toolbar.isVisible() and not w.single_mode.isChecked()
+    w.single_mode.setChecked(True); w.activateWindow(); settle(app)
+    QTest.keyClick(w, Qt.Key.Key_Escape); settle(app)
+    assert not w.single_mode.isChecked() and w.toolbar.isVisible()
+
+
+def test_x11_long_press_and_border_resize_use_real_window_geometry(window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    w, e, app = window
+    w.single_mode.setChecked(True); w.resize(500, 220); settle(app)
+    g = w.surface_gestures; g.platform = 'xcb'
+    monkeypatch.setattr(type(w), 'grabMouse', lambda self: None)
+    monkeypatch.setattr(type(w.windowHandle()), 'startSystemMove', lambda self: pytest.fail('X11 must not rely on a compositor move acknowledgement'))
+    monkeypatch.setattr(type(w.windowHandle()), 'startSystemResize', lambda self, edges: pytest.fail('X11 resize uses direct geometry'))
+    point = w.mapToGlobal(QPoint(200, 80)); before = w.pos()
+    send_pointer(w.timeline, QEvent.Type.MouseButtonPress, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    g.hold.stop(); g.begin_move()
+    send_pointer(w, QEvent.Type.MouseMove, point + QPoint(25, 15), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert w.pos() == before + QPoint(25, 15)
+    send_pointer(w, QEvent.Type.MouseButtonRelease, point, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    edge = w.mapToGlobal(QPoint(w.width()-2, w.height()-2)); before = w.size()
+    send_pointer(w.timeline, QEvent.Type.MouseButtonPress, edge, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    assert g.resize_edges and not g.hold.isActive()
+    send_pointer(w, QEvent.Type.MouseMove, edge + QPoint(40, 30), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert w.width() == before.width() + 40 and w.height() == before.height() + 30
+    send_pointer(w, QEvent.Type.MouseMove, edge - QPoint(1000, 1000), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    assert w.width() == 240 and w.height() == 100
+    send_pointer(w, QEvent.Type.MouseButtonRelease, edge, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    assert not g.resize_edges and not g.pressed
